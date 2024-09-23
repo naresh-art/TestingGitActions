@@ -1,0 +1,49 @@
+# .github/workflows/sfdx-scan.yml
+name: SFDX Code Scan
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  sfdx-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Install Salesforce CLI manually
+      - name: Install Salesforce CLI
+        run: |
+          curl -sSL https://developer.salesforce.com/media/salesforce-cli/sfdx-linux-amd64.tar.xz | tar -xJ
+          ./sfdx/install
+
+      # Step 3: Verify Salesforce CLI installation
+      - name: Verify Salesforce CLI
+        run: sfdx --version
+
+      # Step 4: Install the SFDX Scanner Plugin
+      - name: Install SFDX Scanner Plugin
+        run: sfdx plugins:install @salesforce/sfdx-scanner
+
+      # Step 5: Run the SFDX Scanner on the codebase
+      - name: Run SFDX Scanner
+        run: |
+          sfdx scanner:run --target "src/**/*" --format json --json > scan-results.json
+
+      # Step 6: Check for Quality Gate Failure
+      - name: Check for Quality Gate Failure
+        run: |
+          echo "Checking scan results..."
+          numIssues=$(jq '.summary.length' scan-results.json)
+          if [ "$numIssues" -gt 0 ]; then
+            echo "Code scan failed with $numIssues issues. Failing the commit."
+            exit 1
+          else
+            echo "No issues found. Commit is valid."
