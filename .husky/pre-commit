@@ -1,6 +1,19 @@
-#!/bin/sh
-. "$(dirname "$0")/_/husky.sh"
+#!/bin/bash
 
-# npm run precommit
+# Run PMD analysis using the sfdx scanner
+echo "Running SFDC Scanner for PMD violations..."
 
-npx husky add .husky/pre-commit "sfdx scanner:run --target 'src/**/*'"
+# Run the sfdx scanner for your code (adjust the target path as needed)
+output=$(sfdx scanner:run --target "path/to/your/code" --format json --engine pmd)
+
+# Check if the PMD violations exist
+violations=$(echo "$output" | grep -o '"violationCount":[0-9]*' | grep -o '[0-9]*')
+
+if [[ "$violations" -gt 0 ]]; then
+  echo "PMD violations found! Commit aborted."
+  echo "$output" # Print the full output for context
+  exit 1 # Fail the commit
+else
+  echo "No PMD violations found. Proceeding with the commit."
+  exit 0 # Allow the commit to proceed
+fi
