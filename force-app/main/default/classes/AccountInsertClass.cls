@@ -8,7 +8,6 @@ public with sharing class AccountInsertClass {
             acc.Description='Happy Welcome';
         }
         System.debug('Account List::'+accList);
-        System.debug('Account List::'+accList);
     }
     public static void insertAccountOpp(List<Account> accList){
         System.debug('Opportunity::');
