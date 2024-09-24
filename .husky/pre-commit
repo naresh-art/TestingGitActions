@@ -1,14 +1,21 @@
 #!/bin/bash
 
-# Run PMD analysis using the sfdx scanner
+# Run PMD analysis using sfdx scanner
 echo "Running SFDC Scanner for PMD violations..."
 
-# Run the sfdx scanner for your code (adjust the target path as needed)
-output=$(sfdx scanner:run --target "path/to/your/code" --format json --engine pmd)
+# Target path for your Apex classes
+TARGET_PATH="force-app/main/default/classes"
 
-# Check if the PMD violations exist
+# Path to the custom PMD rules file (if you created one)
+RULESET="pmd-rules.xml"
+
+# Run sfdx scanner with the PMD engine and custom ruleset
+output=$(sfdx scanner:run --target "$TARGET_PATH" --format json --engine pmd --ruleset "$RULESET")
+
+# Extract the number of violations from the JSON output
 violations=$(echo "$output" | grep -o '"violationCount":[0-9]*' | grep -o '[0-9]*')
 
+# Check if there are any violations
 if [[ "$violations" -gt 0 ]]; then
   echo "PMD violations found! Commit aborted."
   echo "$output" # Print the full output for context
