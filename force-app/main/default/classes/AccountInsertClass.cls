@@ -3,6 +3,7 @@ public with sharing class AccountInsertClass {
 
     }
     public static void insertAccount(List<Account> accList){
+        System.debug('Account::');
         for(Account acc:accList){
             acc.Description='Happy Welcome';
         }

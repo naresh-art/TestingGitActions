@@ -10,8 +10,15 @@
     </description>
 
     <!-- Example Rules -->
+    <!-- Avoid global modifier -->
     <rule ref="category/apex/design.xml/AvoidGlobalModifier" />
+
+    <!-- Avoid SOQL in loops -->
     <rule ref="category/apex/performance.xml/AvoidSoqlInLoops" />
+
+    <!-- Ensure unit test classes have asserts -->
     <rule ref="category/apex/errorprone.xml/ApexUnitTestClassShouldHaveAsserts" />
 
+    <!-- Avoid System.debug statements (newly added rule) -->
+    <rule ref="category/apex/codestyle.xml/SystemDebugRule" />
 </ruleset>
