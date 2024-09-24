@@ -1,6 +1,4 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
-# npm run precommit
-
-npx husky add .husky/pre-commit "sfdx scanner:run --target 'src/**/*'"
+npm run precommit

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="Custom Apex PMD Ruleset"
+         xmlns="http://pmd.sf.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sf.net/ruleset/2.0.0 https://pmd.sf.net/ruleset_2_0_0.xsd"
+         xsi:noNamespaceSchemaLocation="https://pmd.sf.net/ruleset_2_0_0.xsd">
+
+    <description>
+        Custom PMD Rules for Apex code quality.
+    </description>
+
+    <!-- Example Rules -->
+    <rule ref="category/apex/design.xml/AvoidGlobalModifier" />
+    <rule ref="category/apex/performance.xml/AvoidSoqlInLoops" />
+    <rule ref="category/apex/errorprone.xml/ApexUnitTestClassShouldHaveAsserts" />
+
+</ruleset>
