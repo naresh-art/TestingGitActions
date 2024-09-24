@@ -1,15 +1,17 @@
 public with sharing class AccountInsertClass {
     public AccountInsertClass() {
-
+ 
     }
     public static void insertAccount(List<Account> accList){
-        System.debug('Account ::');
+        System.debug('Account::');
         for(Account acc:accList){
             acc.Description='Happy Welcome';
         }
+       
         System.debug('Account List::'+accList);
     }
     public static void insertAccountOpp(List<Account> accList){
+        System.debug('Opportunity::');
         List<Opportunity> oppList = new List<Opportunity>();
         for(Account acc:accList){
             Opportunity opp = new Opportunity();

@@ -1,4 +1,5 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
-npm run precommit
+# Run lint checks and scanner before commit
+npm run lint && npm run pmd-scan
