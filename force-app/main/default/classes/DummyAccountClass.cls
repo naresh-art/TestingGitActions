@@ -22,7 +22,6 @@ public with sharing class DummyAccountClass {
             throw new CustomException('You do not have permission to create Account records.');
         }
     }
-
     /**
      * @description Inserts a list of Account records and updates their description.
      * Performs CRUD and FLS validation before insertion.

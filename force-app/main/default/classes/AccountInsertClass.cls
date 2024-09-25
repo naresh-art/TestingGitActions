@@ -48,7 +48,6 @@ public with sharing class AccountInsertClass {
             throw new CustomException('You do not have permission to create Opportunity records.');
         }
     }
-
     /**
      * @description Inserts a list of Account records and updates their description.
      * Performs CRUD and FLS validation before insertion.
