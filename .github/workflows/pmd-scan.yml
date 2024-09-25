@@ -1,0 +1,39 @@
+name: SFDC Scanner PMD Check
+
+on:
+  push:
+    branches:
+      - dev  # Specify the branch for PMD scans
+
+jobs:
+  run-pmd-scan:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14'
+
+    - name: Install SFDC Scanner
+      run: npm install -g @salesforce/sfdx-scanner
+
+    - name: Run PMD Scan
+      run: sfdx scanner:run --target "force-app/**/*.cls" --format "json" > pmd-scan-output.json
+
+    - name: Upload PMD Results
+      if: failure()
+      uses: actions/upload-artifact@v2
+      with:
+        name: pmd-scan-output
+        path: pmd-scan-output.json
+
+    - name: Fail on PMD issues
+      run: |
+        if grep -q '"issues": \[\]' pmd-scan-output.json; then
+          echo "No PMD issues found."
+        else
+          echo "PMD issues found."
+          exit 1
