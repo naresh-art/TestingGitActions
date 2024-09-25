@@ -12,7 +12,6 @@ public with sharing class AccountInsertClass {
     }
     public static void insertAccountOpp(List<Account> accList){
         System.debug('Opportunity::');
-        System.debug('Opportunity::');
         List<Opportunity> oppList = new List<Opportunity>();
         for(Account acc:accList){
             Opportunity opp = new Opportunity();
