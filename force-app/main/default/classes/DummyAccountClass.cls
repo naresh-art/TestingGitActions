@@ -15,6 +15,7 @@ public with sharing class DummyAccountClass {
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
                     acc.Description = 'Happy Welcome';
+                    acc.Rating = 'Hot';
                 }
             }
             insert accList;

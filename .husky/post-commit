@@ -1,0 +1,8 @@
+#!/bin/bash
+# Automatically push changes to the origin after commit
+branch=$(git symbolic-ref --short HEAD)
+
+echo "Pushing changes to origin/$branch..."
+git push origin "$branch"
+
+echo "Changes pushed successfully!"
