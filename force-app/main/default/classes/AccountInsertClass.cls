@@ -4,7 +4,6 @@ public with sharing class AccountInsertClass {
     }
     public static void insertAccount(List<Account> accList){
         System.debug('Account::');
-        System.debug('Account::');
         for(Account acc:accList){
             acc.Description='Happy Welcome';
         }
@@ -24,6 +23,7 @@ public with sharing class AccountInsertClass {
         }
         if(oppList.size()>0){
             insert oppList;
+            System.debug('List');
             System.debug('Opportunity List::'+oppList);
         }
     }
