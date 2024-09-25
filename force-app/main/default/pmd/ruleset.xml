@@ -129,7 +129,7 @@
     <priority>1</priority>
     </rule>
     <rule name="VariableNamingConventions" language="apex" since="5.5.0" deprecated="true" message="{0} variable {1} should begin with {2}" class="net.sourceforge.pmd.lang.apex.rule.codestyle.VariableNamingConventionsRule" externalInfoUrl="https://pmd.sourceforge.io/pmd_rules_apex_codestyle.html#variablenamingconventions">
-    <description> A variable naming conventions rule - customize this to your liking. Currently, it checks for final variables that should be fully capitalized and non-final variables that should not include underscores. This rule is deprecated and will be removed with PMD 7.0.0. The rule is replaced by the more general rules {% rule "apex/codestyle/FieldNamingConventions" %}, {% rule "apex/codestyle/FormalParameterNamingConventions" %}, {% rule "apex/codestyle/LocalVariableNamingConventions" %}, and {% rule "apex/codestyle/PropertyNamingConventions" %}. </description>
+    <description> A variable naming conventions rule - customize this to your liking. Currently, it checks for final variables that should be fully capitalized and non-final variables that should not include underscores. This rule is deprecated and will be removed with PMD 7.0.0. The rule is replaced by the more general rules for FieldNamingConventions, FormalParameterNamingConventions, LocalVariableNamingConventions, and PropertyNamingConventions. </description>
     <priority>1</priority>
     </rule>
     <rule name="WhileLoopsMustUseBraces" language="apex" since="5.6.0" message="Avoid using 'while' statements without curly braces" class="net.sourceforge.pmd.lang.apex.rule.ApexXPathRule" externalInfoUrl="https://pmd.sourceforge.io/pmd_rules_apex_codestyle.html#whileloopsmustusebraces">
@@ -319,15 +319,15 @@
     </properties>
     </rule>
     <rule name="AvoidDmlStatementsInLoops" language="apex" since="5.5.0" deprecated="true" message="Avoid DML statements inside loops" class="net.sourceforge.pmd.lang.apex.rule.performance.AvoidDmlStatementsInLoopsRule" externalInfoUrl="https://pmd.sourceforge.io/pmd_rules_apex_performance.html#avoiddmlstatementsinloops">
-    <description> Avoid DML statements inside loops to avoid hitting the DML governor limit. Instead, try to batch up the data into a list and invoke your DML once on that list of data outside the loop. This rule is deprecated and will be removed with PMD 7.0.0. The rule is replaced by the more general rule {% rule "apex/performance/OperationWithLimitsInLoop" %}. </description>
+    <description> Avoid DML statements inside loops to avoid hitting the DML governor limit. Instead, try to batch up the data into a list and invoke your DML once on that list of data outside the loop. This rule is deprecated and will be removed with PMD 7.0.0. The rule is replaced by the more general rule OperationWithLimitsInLoop. </description>
     <priority>3</priority>
     </rule>
     <rule name="AvoidSoqlInLoops" language="apex" since="5.5.0" deprecated="true" message="Avoid Soql queries inside loops" class="net.sourceforge.pmd.lang.apex.rule.performance.AvoidSoqlInLoopsRule" externalInfoUrl="https://pmd.sourceforge.io/pmd_rules_apex_performance.html#avoidsoqlinloops">
-    <description> New objects created within loops should be checked to see if they can created outside them and reused. This rule is deprecated and will be removed with PMD 7.0.0. The rule is replaced by the more general rule {% rule "apex/performance/OperationWithLimitsInLoop" %}. </description>
+    <description> New objects created within loops should be checked to see if they can created outside them and reused. This rule is deprecated and will be removed with PMD 7.0.0. The rule is replaced by the more general rule OperationWithLimitsInLoop. </description>
     <priority>3</priority>
     </rule>
     <rule name="AvoidSoslInLoops" language="apex" since="6.0.0" deprecated="true" message="Avoid Sosl queries inside loops" class="net.sourceforge.pmd.lang.apex.rule.performance.AvoidSoslInLoopsRule" externalInfoUrl="https://pmd.sourceforge.io/pmd_rules_apex_performance.html#avoidsoslinloops">
-    <description> Sosl calls within loops can cause governor limit exceptions. This rule is deprecated and will be removed with PMD 7.0.0. The rule is replaced by the more general rule {% rule "apex/performance/OperationWithLimitsInLoop" %}. </description>
+    <description> Sosl calls within loops can cause governor limit exceptions. This rule is deprecated and will be removed with PMD 7.0.0. The rule is replaced by the more general rule OperationWithLimitsInLoop. </description>
     <priority>3</priority>
     </rule>
     <rule name="EagerlyLoadedDescribeSObjectResult" language="apex" since="6.40.0" message="DescribeSObjectResult could be being loaded eagerly with all child relationships." class="net.sourceforge.pmd.lang.apex.rule.ApexXPathRule" externalInfoUrl="https://pmd.sourceforge.io/pmd_rules_apex_performance.html#eagerlyloadeddescribesobjectresult">
