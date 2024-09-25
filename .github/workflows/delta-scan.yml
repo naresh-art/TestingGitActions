@@ -70,7 +70,7 @@ jobs:
               echo "Files to scan: $files"
               if [ -n "$files" ]; then
                 echo "Using custom ruleset: SFDX Code Scan Delta"
-                sf scanner:run --target "$files" --format "csv" --outfile "scanner-report.csv" --ruleset "force-app/main/default/pmd/ruleset.xml" || { echo "Scanner run failed"; exit 1; }
+                sf scanner:run --target "$files" --format "csv" --outfile "scanner-report.csv" || { echo "Scanner run failed"; exit 1; }
                 echo "Scanner report contents:"
                 cat scanner-report.csv
               else
