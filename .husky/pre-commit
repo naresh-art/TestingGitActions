@@ -1,9 +1,6 @@
 #!/bin/bash
 
-# Get the current branch name dynamically
-current_branch=$(git branch --show-current)
-
-# Get the list of changed Apex (.cls) or LWC files staged for commit
+# Get the list of changed Apex (.cls) or LWC files
 changed_files=$(git diff --cached --name-only | grep -E '\.cls$|\.lwc$')
 
 # Check if there are any relevant changes
@@ -30,19 +27,18 @@ echo "Severity Fail Count:::::: $severity_fail_count"
 # Block commit if there are severity 3 issues
 if [ "$severity_fail_count" -gt 0 ]; then
   echo "Blocking your commit due to vulnerabilities found with severity 3."
-  # Optionally display the report for the user
-  cat precommit-scanner-report.json
   exit 1
 else
-  # No violations found, proceed with commit
   echo "No vulnerabilities found. Proceeding with commit."
   
-  # Commit the changes (this happens automatically if no errors are found)
+  # Dynamically get the current branch
+  current_branch=$(git rev-parse --abbrev-ref HEAD)
   
-  # Automatically push the changes to the current branch
-  echo "Pushing the changes to the current branch: $current_branch"
+  # Display message and push changes to the current branch
+  echo "No vulnerabilities found. Proceeding with commit and pushing changes to branch: $current_branch."
+  
+  # Push changes to the current branch
   git push origin "$current_branch"
   
-  echo "Changes pushed successfully to branch: $current_branch"
   exit 0
 fi
