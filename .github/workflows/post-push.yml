@@ -1,0 +1,19 @@
+name: Post-Push Workflow
+
+on:
+  push:
+    branches:
+      - main  # or any other branch
+
+jobs:
+  post-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Run post-push script
+        run: |
+          echo "Post-push script running!"
+          # Add any other commands you want to run after a push
+          echo "Completed post-push actions."
