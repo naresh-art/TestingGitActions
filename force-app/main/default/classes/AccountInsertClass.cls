@@ -23,7 +23,7 @@ public with sharing class AccountInsertClass {
         }
         if(oppList.size()>0){
             insert oppList;
-            System.debug('Lists');
+            System.debug('Lists opp');
             System.debug('Opportunity List::'+oppList);
         }
     }
