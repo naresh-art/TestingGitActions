@@ -25,7 +25,6 @@ public with sharing class DummyAccountClass {
     /**
      * @description Inserts a list of Account records and updates their description.
      * Performs CRUD and FLS validation before insertion.
-     *
      * @param accList The list of Account records to be inserted.
      * @throws CustomException If the user lacks permission to insert accounts.
      */
