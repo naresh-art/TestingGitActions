@@ -3,11 +3,6 @@
  * It performs necessary validation, including CRUD and FLS checks, before executing any DML operations.
  */
 public with sharing class DummyAccountClass {
-
-    public DummyAccountClass(){
-
-    } 
-
     /**
      * @description Inserts a list of Account records and updates their description.
      * Performs CRUD and FLS validation before insertion.

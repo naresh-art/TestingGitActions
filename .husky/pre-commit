@@ -12,31 +12,8 @@ fi
 # Convert changed_files into an array
 changed_files_array=($changed_files)
 
-# Create a temporary directory to store modified snippets
-tmp_dir=$(mktemp -d)
-
-# Extract only the changed lines or methods from each file
-for file in "${changed_files_array[@]}"; do
-  # Create a temporary file for the current file's changes
-  tmp_file="$tmp_dir/$(basename "$file")"
-  
-  # Extract the lines that have changed in the file (from staged changes)
-  git diff --cached "$file" > "$tmp_file"
-
-  # If the tmp_file is not empty, add it to the list of files to scan
-  if [ -s "$tmp_file" ]; then
-    files_to_scan+=("$tmp_file")
-  fi
-done
-
-# Check if there are any files to scan
-if [ ${#files_to_scan[@]} -eq 0 ]; then
-  echo "No relevant method changes detected for scan."
-  exit 0
-fi
-
-# Run the SFDX scanner on the modified parts of the changed files
-sf scanner:run --target "${files_to_scan[@]}" --format "json" --outfile "precommit-scanner-report.json"
+# Run the SFDX scanner on each of the changed files (full files, not diffs)
+sf scanner:run --target "${changed_files_array[@]}" --format "json" --outfile "precommit-scanner-report.json"
 
 # Check if the JSON report exists
 if [ ! -f "precommit-scanner-report.json" ]; then
@@ -54,13 +31,8 @@ echo "$severity_fail_count"
 # Block commit if there are severity 3 or higher issues
 if [ "$severity_fail_count" -gt 0 ]; then
   echo "Blocking your commit due to vulnerabilities found with severity 3 or higher."
-  # Optionally display the report for the user
-  # cat precommit-scanner-report.json
   exit 1
 else
   echo "No vulnerabilities found. Proceeding with commit."
   exit 0
 fi
-
-# Clean up temporary files
-rm -rf "$tmp_dir"
