@@ -12,10 +12,8 @@ public with sharing class TestAccountClass {
     }
 
     public static void insertAccountTest(List<Account> accList){
-        System.debug('Account List::'+accList);
-        System.debug('Account List::'+accList);
-        System.debug('Account List::'+accList);
-        System.debug('Account List::'+accList);
-        System.debug('Account List::'+accList);
+        System.debug('Account List new1::'+accList);
+        System.debug('Account List new1::'+accList);
+        System.debug('Account List new1::'+accList);
     }
 }
