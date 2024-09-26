@@ -1,6 +1,6 @@
 public with sharing class TestAccountClass {
     public AccountInsertClass() {
- 
+
     }
     public static void insertAccount(List<Account> accList){
         System.debug('Account::');
@@ -8,6 +8,10 @@ public with sharing class TestAccountClass {
             acc.Description='Happy Welcome';
         }
        
+        System.debug('Account List::'+accList);
+    }
+
+    public static void insertAccountTest(List<Account> accList){
         System.debug('Account List::'+accList);
     }
 }
