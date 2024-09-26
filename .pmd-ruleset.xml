@@ -1,0 +1,12 @@
+<ruleset name="Custom Salesforce PMD Rule Set" xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0
+         http://pmd.sourceforge.net/ruleset_2_0_0.xsd">
+    <description>
+        This is a custom ruleset for Salesforce PMD scanning.
+    </description>
+
+    <rule ref="category/apex/bestpractices.xml/ApexUnitTestClassShouldHaveAsserts" />
+    <rule ref="category/apex/performance.xml/AvoidSoqlInLoops" />
+    <!-- Add other rules as necessary -->
+</ruleset>

@@ -31,36 +31,10 @@ echo "$severity_fail_count"
 # Block commit if there are severity 3 issues
 if [ "$severity_fail_count" -gt 0 ]; then
   echo "Blocking your commit due to vulnerabilities found with severity 3."
+  # Optionally display the report for the user
+  # cat precommit-scanner-report.json
   exit 1
 else
   echo "No vulnerabilities found. Proceeding with commit."
-
-  # Simulate post-commit behavior (optional)
-  echo "Simulating post-commit behavior..."
-  
-  # Capture the current branch
-  branch=$(git symbolic-ref --short HEAD)
-  echo "Current branch: $branch"
-
-  # Ensure the branch name was detected
-  if [ -z "$branch" ]; then
-    echo "Error: Could not detect the current branch."
-    exit 1
-  fi
-
-  # Push the changes
-  echo "Pushing changes to origin/$branch..."
-  git push origin "$branch"
-
-  # Check if the push succeeded
-  if [ $? -eq 0 ]; then
-    echo "Post-push actions starting..."
-    # Add any post-push actions here, like notifying a service or running scripts
-    echo "Completed post-push actions."
-  else
-    echo "Push failed. No post-push actions executed."
-    exit 1
-  fi
-
   exit 0
 fi
