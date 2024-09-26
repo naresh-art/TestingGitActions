@@ -37,13 +37,29 @@ for file in $changed_files; do
       exit 1
     fi
 
-    # Parse the JSON report and check for violations (adjust jq command to match your JSON structure)
-    severity_fail_count=$(jq '[.result.summary.files[].violations[] | select(.severity == 3)] | length' "$output_file")
+    # Use jq to extract the violations from the JSON report, updating based on actual structure
+    violations=$(jq '.files[0].violations[]' "$output_file")
+
+    # Initialize severity count
+    severity_fail_count=0
+
+    # Loop through the violations and compare line numbers with changed lines
+    while IFS= read -r line; do
+      violation_line=$(echo "$line" | jq '.line')
+      
+      # Check if the violation line matches any of the changed lines
+      if echo "$changed_lines" | grep -q "$violation_line"; then
+        severity=$(echo "$line" | jq '.severity')
+        if [ "$severity" -eq 3 ]; then
+          ((severity_fail_count++))
+        fi
+      fi
+    done <<< "$violations"
 
     # Output the fail count for debugging
     echo "Severity Fail Count for $file: $severity_fail_count"
 
-    # Block commit if there are severity 3 issues
+    # Block commit if there are severity 3 issues in the changed lines
     if [ "$severity_fail_count" -gt 0 ]; then
       echo "Blocking your commit due to vulnerabilities found with severity 3 in $file."
       exit 1

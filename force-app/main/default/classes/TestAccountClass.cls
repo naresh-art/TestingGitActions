@@ -15,5 +15,6 @@ public with sharing class TestAccountClass {
         System.debug('Account List new1::'+accList);
         System.debug('Account List new1::'+accList);
         System.debug('Account List new1::'+accList);
+        System.debug('Account List new1::'+accList);
     }
 }
