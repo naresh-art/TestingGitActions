@@ -71,6 +71,7 @@ public with sharing class DummyAccountClass {
     }
 
     public static void insertAccountOppMethod(List<Account> accLists){
+        System.debug('Welcome to account');
         if(Schema.sObjectType.Opportunity.isCreateable()){
             List<Opportunity> oppList = new List<Opportunity>();
             for(Account acc : accLists){

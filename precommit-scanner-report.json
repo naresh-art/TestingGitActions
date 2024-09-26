@@ -1,1 +1,1 @@
-[]
+[{"engine":"pmd","fileName":"C:\\Code Scanning Git\\TestingGitActions\\force-app\\main\\default\\classes\\DummyAccountClass.cls","violations":[{"line":73,"column":19,"endLine":90,"endColumn":6,"severity":3,"ruleName":"ApexDoc","category":"Documentation","url":"https://docs.pmd-code.org/pmd-doc-7.4.0/pmd_rules_apex_documentation.html#apexdoc","message":"\r\nMissing ApexDoc comment\r\n"}]}]
