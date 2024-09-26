@@ -1,64 +1,67 @@
 #!/bin/bash
-
+ 
 # Get the list of changed Apex (.cls) or LWC files
 changed_files=$(git diff --cached --name-only | grep -E '\.cls$|\.lwc$')
-
+ 
 # Check if there are any relevant changes
 if [ -z "$changed_files" ]; then
   echo "No relevant changes to scan."
   exit 0
 fi
-
+ 
 # Convert changed_files into an array
 changed_files_array=($changed_files)
-
-# Create a temporary directory to store modified snippets
-tmp_dir=$(mktemp -d)
-
-# Extract only the changed lines or methods from each file
+ 
+# Get the diff with line numbers for the added lines in the staged files
 for file in "${changed_files_array[@]}"; do
-  # Create a temporary file for the current file's changes
-  tmp_file="$tmp_dir/$(basename "$file")"
-
-  # Extract only new lines or changes in the file (from staged changes)
-  git diff --cached -U0 "$file" | grep -E '^\+[^+]' > "$tmp_file"
-
-  # If the tmp_file is not empty, add it to the list of files to scan
-  if [ -s "$tmp_file" ]; then
-    files_to_scan+=("$tmp_file")
+  echo "Analyzing changed lines in $file..."
+ 
+  # Get the added/modified lines in the staged files
+  git diff --cached -U0 "$file" | grep '^+' | grep -v '^+++' > "diff-$file.patch"
+ 
+  # If no new lines added, skip the file
+  if [ ! -s "diff-$file.patch" ]; then
+    echo "No new lines added in $file."
+    continue
+  fi
+ 
+  # Run the SFDX scanner on the file and output in JSON format
+  sf scanner:run --target "$file" --format "json" --outfile "scanner-report-$file.json"
+ 
+  # Check if the JSON report exists
+  if [ ! -f "scanner-report-$file.json" ]; then
+    echo "Scanner report not found for $file. Please check the scanner command."
+    exit 1
+  fi
+ 
+  # Check for severity 3 issues within the report
+  new_vulnerabilities=0
+  while IFS= read -r line; do
+    line_number=$(echo "$line" | grep -oP '^\+\K\d+')
+ 
+    # Extract violations from the JSON report and check if any correspond to the changed lines
+    vulnerabilities_in_line=$(jq --argjson line_number "$line_number" '
+      .violations[] | select(.line == $line_number and .severity == 3)
+    ' "scanner-report-$file.json")
+ 
+    if [ -n "$vulnerabilities_in_line" ]; then
+      echo "New vulnerability found in $file at line $line_number"
+      ((new_vulnerabilities++))
+    fi
+  done < "diff-$file.patch"
+ 
+  # Block the commit if new vulnerabilities were found
+  if [ "$new_vulnerabilities" -gt 0 ]; then
+    echo "Blocking your commit due to new vulnerabilities found with severity 3 in $file."
+    exit 1
+  else
+    echo "No new vulnerabilities found in changed lines of $file. Proceeding with commit."
   fi
 done
-
-# Check if there are any files to scan
-if [ ${#files_to_scan[@]} -eq 0 ]; then
-  echo "No relevant changes detected for scan."
-  exit 0
-fi
-
-# Run the SFDX scanner on the modified parts of the changed files
-sf scanner:run --target "${files_to_scan[@]}" --format "json" --outfile "precommit-scanner-report.json"
-
-# Check if the JSON report exists
-if [ ! -f "precommit-scanner-report.json" ]; then
-  echo "Scanner report not found. Please check the scanner command."
-  exit 1
-fi
-
-# Manually parse the JSON and check for severity 3 or higher issues within violations array
-severity_fail_count=$(grep -oP '"severity":\s*[34]' precommit-scanner-report.json | wc -l)
-
-# Output the fail count for debugging
-echo "Severity Fail Count::::::"
-echo "$severity_fail_count"
-
-# Block commit if there are severity 3 or higher issues
-if [ "$severity_fail_count" -gt 0 ]; then
-  echo "Blocking your commit due to vulnerabilities found with severity 3 or higher."
-  exit 1
-else
-  echo "No vulnerabilities found. Proceeding with commit."
-  exit 0
-fi
-
-# Clean up temporary files
-rm -rf "$tmp_dir"
+ 
+# Clean up temporary patch files
+rm -f diff-*.patch
+ 
+# If no vulnerabilities are found, allow the commit
+echo "No vulnerabilities found in the new or modified code. Proceeding with commit."
+exit 0
