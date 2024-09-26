@@ -48,13 +48,13 @@ public with sharing class DummyAccountClass {
      * @description Inserts related Opportunity records for a given list of Account records.
      * Performs CRUD validation before inserting opportunities.
      *
-     * @param accList The list of Account records for which Opportunities are created.
+     * @param accLists The list of Account records for which Opportunities are created.
      * @throws CustomException If the user lacks permission to insert opportunities.
      */
-    public static void insertAccountOpp(List<Account> accList){
+    public static void insertAccountOpp(List<Account> accLists){
         if(Schema.sObjectType.Opportunity.isCreateable()){
             List<Opportunity> oppList = new List<Opportunity>();
-            for(Account acc : accList){
+            for(Account acc : accLists){
                 Opportunity opp = new Opportunity();
                 opp.Name = acc.Name;
                 opp.CloseDate = System.Today();
