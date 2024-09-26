@@ -12,56 +12,59 @@ fi
 # Convert changed_files into an array
 changed_files_array=($changed_files)
 
-# Get the diff with line numbers for the added lines in the staged files
+# Iterate over each changed file
 for file in "${changed_files_array[@]}"; do
   echo "Analyzing changed lines in $file..."
   
-  # Base file name for patch
+  # Create a patch file containing the added/modified lines
   base_filename=$(basename "$file")
+  patch_file="diff-$base_filename.patch"
 
-  # Get the added/modified lines in the staged files
-  git diff --cached -U0 "$file" | grep '^+' | grep -v '^+++' > "diff-$base_filename.patch"
-  
+  git diff --cached -U0 "$file" | grep '^+' | grep -v '^+++' > "$patch_file"
+
   # Check if the patch file was created
-  if [ ! -f "diff-$base_filename.patch" ]; then
-    echo "Failed to create diff-$base_filename.patch for $file."
-    continue
-  fi
-
-  # If no new lines added, skip the file
-  if [ ! -s "diff-$base_filename.patch" ]; then
+  if [ ! -f "$patch_file" ] || [ ! -s "$patch_file" ]; then
     echo "No new lines added in $file."
     continue
   fi
 
   # Run the SFDX scanner on the file and output in JSON format
-  echo "Running scanner for $file with output to scanner-report-$base_filename.json"
-  sf scanner:run --target "$file" --format "json" --outfile "scanner-report-$base_filename.json"
+  report_file="scanner-report-$base_filename.json"
+  sf scanner:run --target "$file" --format "json" --outfile "$report_file"
 
   # Check if the JSON report exists
-  if [ ! -f "scanner-report-$base_filename.json" ]; then
+  if [ ! -f "$report_file" ]; then
     echo "Scanner report not found for $file. Please check the scanner command."
     exit 1
   fi
 
-  # Check for severity 3 issues within the report
+  # Extract line numbers from the patch file and filter vulnerabilities for those lines
   new_vulnerabilities=0
+  changed_lines=()
+
+  # Get line numbers for changed lines from the patch
   while IFS= read -r line; do
     line_number=$(echo "$line" | grep -oP '^\+\K\d+')
-    
-    vulnerabilities_in_line=$(jq --argjson line_number "$line_number" '
-      .violations[] | select(.line == $line_number and .severity == 3)
-    ' "scanner-report-$base_filename.json")
-    
+    if [ -n "$line_number" ]; then
+      changed_lines+=("$line_number")
+    fi
+  done < "$patch_file"
+
+  # Check for vulnerabilities in the changed lines using jq to filter by line and severity
+  for changed_line in "${changed_lines[@]}"; do
+    vulnerabilities_in_line=$(jq --argjson line_number "$changed_line" '
+      .violations[] | select(.line == $line_number and .severity >= 3)
+    ' "$report_file")
+
     if [ -n "$vulnerabilities_in_line" ]; then
-      echo "New vulnerability found in $file at line $line_number"
+      echo "New vulnerability found in $file at line $changed_line"
       ((new_vulnerabilities++))
     fi
-  done < "diff-$base_filename.patch"
+  done
 
   # Block the commit if new vulnerabilities were found
   if [ "$new_vulnerabilities" -gt 0 ]; then
-    echo "Blocking your commit due to new vulnerabilities found with severity 3 in $file."
+    echo "Blocking your commit due to new vulnerabilities found with severity >= 3 in $file."
     exit 1
   else
     echo "No new vulnerabilities found in changed lines of $file. Proceeding with commit."
