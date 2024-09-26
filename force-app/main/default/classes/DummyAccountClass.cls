@@ -69,4 +69,23 @@ public with sharing class DummyAccountClass {
             throw new CustomException('You do not have permission to create Opportunity records.');
         }
     }
+
+    public static void insertAccountOppMethod(List<Account> accLists){
+        if(Schema.sObjectType.Opportunity.isCreateable()){
+            List<Opportunity> oppList = new List<Opportunity>();
+            for(Account acc : accLists){
+                Opportunity opp = new Opportunity();
+                opp.Name = acc.Name;
+                opp.CloseDate = System.Today();
+                opp.StageName = 'Prospecting';
+                opp.AccountId = acc.Id;
+                oppList.add(opp);
+            }
+            if(oppList.size() > 0){
+                insert oppList;
+            }
+        } else {
+            throw new CustomException('You do not have permission to create Opportunity records.');
+        }
+    }
 }
