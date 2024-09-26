@@ -51,7 +51,7 @@ public with sharing class DummyAccountClass {
      * @param accList The list of Account records for which Opportunities are created.
      * @throws CustomException If the user lacks permission to insert opportunities.
      */
-    public static void InsertAccountOpp(List<Account> accList){
+    public static void insertAccountOpp(List<Account> accList){
         if(Schema.sObjectType.Opportunity.isCreateable()){
             List<Opportunity> oppList = new List<Opportunity>();
             for(Account acc : accList){
