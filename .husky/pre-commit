@@ -48,7 +48,7 @@ for file in "${changed_files_array[@]}"; do
       echo "New vulnerability found in $file at line $line_number"
       ((new_vulnerabilities++))
     fi
-  done < "diff-$file.patch"
+  done < "diff-$file"
  
   # Block the commit if new vulnerabilities were found
   if [ "$new_vulnerabilities" -gt 0 ]; then
