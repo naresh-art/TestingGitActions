@@ -9,65 +9,32 @@ if [ -z "$changed_files" ]; then
   exit 0
 fi
 
-# Ensure that a valid directory exists for the scanner report
-output_dir="./scanner-reports"
-mkdir -p "$output_dir"
+# Convert changed_files into an array
+changed_files_array=($changed_files)
 
-# Loop through each changed file to get the changed lines
-for file in $changed_files; do
-  echo "Checking file: $file"
+# Run the SFDX scanner on each of the changed files
+sf scanner:run --target "${changed_files_array[@]}" --format "json" --outfile "precommit-scanner-report.json"
 
-  # Get the changed lines for each file (in unified diff format)
-  changed_lines=$(git diff --cached -U0 $file | grep -E '^\+[^+]' | sed 's/^\+//')
+# Check if the JSON report exists
+if [ ! -f "precommit-scanner-report.json" ]; then
+  echo "Scanner report not found. Please check the scanner command."
+  exit 1
+fi
 
-  # If there are changed lines, run the scanner for the entire file
-  if [ ! -z "$changed_lines" ]; then
-    echo "Changed lines for $file:"
-    echo "$changed_lines"
-    
-    # Define the output file path
-    output_file="$output_dir/$(basename $file).json"
+# Manually parse the JSON and check for severity 3 issues within violations array
+severity_fail_count=$(grep -oP '"severity":\s*3' precommit-scanner-report.json | wc -l)
 
-    # Run the SFDX scanner for the entire file and save the report in the output directory
-    sf scanner:run --target "$file" --format "json" --outfile "$output_file"
+# Output the fail count for debugging
+echo "Severity Fail Count::::::"
+echo "$severity_fail_count"
 
-    # Check if the JSON report exists
-    if [ ! -f "$output_file" ]; then
-      echo "Scanner report not found for $file. Please check the scanner command."
-      exit 1
-    fi
-
-    # Use jq to extract the violations from the JSON report, updating based on actual structure
-    violations=$(jq '.files[0].violations[]' "$output_file")
-
-    # Initialize severity count
-    severity_fail_count=0
-
-    # Loop through the violations and compare line numbers with changed lines
-    while IFS= read -r line; do
-      violation_line=$(echo "$line" | jq '.line')
-      
-      # Check if the violation line matches any of the changed lines
-      if echo "$changed_lines" | grep -q "$violation_line"; then
-        severity=$(echo "$line" | jq '.severity')
-        if [ "$severity" -eq 3 ]; then
-          ((severity_fail_count++))
-        fi
-      fi
-    done <<< "$violations"
-
-    # Output the fail count for debugging
-    echo "Severity Fail Count for $file: $severity_fail_count"
-
-    # Block commit if there are severity 3 issues in the changed lines
-    if [ "$severity_fail_count" -gt 0 ]; then
-      echo "Blocking your commit due to vulnerabilities found with severity 3 in $file."
-      exit 1
-    fi
-  else
-    echo "No significant changes in $file."
-  fi
-done
-
-echo "No vulnerabilities found. Proceeding with commit."
-exit 0
+# Block commit if there are severity 3 issues
+if [ "$severity_fail_count" -gt 0 ]; then
+  echo "Blocking your commit due to vulnerabilities found with severity 3."
+  # Optionally display the report for the user
+  # cat precommit-scanner-report.json
+  exit 1
+else
+  echo "No vulnerabilities found. Proceeding with commit."
+  exit 0
+fi
