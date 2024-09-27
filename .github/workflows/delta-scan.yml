@@ -1,5 +1,5 @@
 on:
-  push:
+  pull_request:
     branches:
       - '**'
 
@@ -56,14 +56,14 @@ jobs:
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
 
-      - name: Block commit if severity 3 violations are found
+      - name: Block merge if severity 3 violations are found
         run: |
           if [ -f scanner-report.csv ]; then
             # Assuming 'severity' is the third column in the CSV
             severity_fail_count=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner-report.csv)
             echo "Severity 3 issues count: $severity_fail_count"
             if [ "$severity_fail_count" -gt 0 ]; then
-              echo "Blocking your push due to severity 3 vulnerabilities found."
+              echo "Blocking merge due to severity 3 vulnerabilities found."
               exit 1
             else
               echo "No severity 3 vulnerabilities found. Proceeding."
