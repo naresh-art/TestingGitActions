@@ -64,6 +64,7 @@ public with sharing class DummyAccountClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
+                Ststem.debug('welcome to good news::');
             }
         } else {
             throw new CustomException('You do not have permission to create Opportunity records.');
