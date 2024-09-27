@@ -1,5 +1,17 @@
 #!/bin/bash
 
+# Check if Husky is installed
+if ! command -v husky &> /dev/null
+then
+    echo "Husky is not installed. Installing Husky..."
+    npm install husky --save-dev
+
+    # Initialize Husky hooks if it's not already set up
+    npx husky install
+else
+    echo "Husky is already installed."
+fi
+
 # Get the list of changed Apex (.cls) or LWC files
 changed_files=$(git diff --cached --name-only | grep -E '\.cls$|\.lwc$')
 
@@ -22,7 +34,7 @@ if [ ! -f "precommit-scanner-report.json" ]; then
 fi
 
 # Manually parse the JSON and check for severity 3 issues within violations array
-severity_fail_count=$(grep -oP '"severity":\s*3 || s*1' precommit-scanner-report.json | wc -l)
+severity_fail_count=$(grep -oP '"severity":\s*3' precommit-scanner-report.json | wc -l)
 
 # Output the fail count for debugging
 echo "Severity Fail Count::::::"
