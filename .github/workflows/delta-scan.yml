@@ -42,13 +42,17 @@ jobs:
           fi
           cat changed_files.txt
 
-      - name: Run SFDX Scanner on Changed Files
+      - name: Run SFDX Scanner on All Changed Files
         id: run-scanner
         run: |
           files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
           if [ -n "$files" ]; then
-            sf scanner:run --target "$files" --format csv --outfile scanner-report.csv || { echo "Scanner run failed"; exit 1; }
+            # Process all files individually in a loop
+            for file in $files; do
+              echo "Running scanner on $file"
+              sf scanner:run --target "$file" --format csv --outfile scanner-report.csv --category "Performance" || { echo "Scanner run failed on $file"; exit 1; }
+            done
           else
             echo "No relevant files changed."
             touch scanner-report.csv
