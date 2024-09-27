@@ -39,7 +39,6 @@ public with sharing class DummyAccountClass {
                 }
             }
             insert accList;
-            System.debug('Naresh Testing for PMD Rules old branch to new branch:');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
@@ -65,7 +64,6 @@ public with sharing class DummyAccountClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
-                System.debug('Naresh Testing for PMD Rules old branch to new branches one file:');
             }
         } else {
             throw new CustomException('You do not have permission to create Opportunity records.');
