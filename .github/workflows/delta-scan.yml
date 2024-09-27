@@ -1,35 +1,34 @@
-name: SFDX Code Scan Workflow
-
 on:
   push:
     branches:
       - '**'
 
 jobs:
-  code-scan:
+  run-code-scan:
     runs-on: ubuntu-latest
     steps:
-      # Step 1: Check out the repository
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      # Step 2: Set up Node.js
       - name: Use Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 20.x
 
-      # Step 3: Install Salesforce CLI
       - name: Install Salesforce CLI
         run: npm install @salesforce/cli --global
 
-      # Step 4: Install SFDX Scanner Plugin
-      - name: Install SFDX Scanner Plugin
+      - name: Install Scanner Plugin
         run: sf plugins install @salesforce/sfdx-scanner
 
-      # Step 5: Fetch changed files
-      - name: Get Changed Files
+      - name: Verify Salesforce CLI Installation
+        run: sf --version
+
+      - name: Verify Scanner Plugin Installation
+        run: sf plugins --core
+
+      - name: Get changed files
         id: get-changes
         run: |
           git fetch --unshallow || true
@@ -41,41 +40,41 @@ jobs:
           fi
           cat changed_files.txt
 
-      # Step 6: Run SFDX Scanner on changed files
       - name: Run SFDX Scanner on Changed Files
+        id: run-scanner
         run: |
           files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
           if [ -n "$files" ]; then
-            sf scanner:run --target "$files" --format "json" --outfile "scanner-report.json"
+            sf scanner:run --target "$files" --format json --outfile scanner-report.csv || { echo "Scanner run failed"; exit 1; }
           else
-            echo "No Apex or LWC files changed."
+            echo "No relevant files changed."
+            touch scanner-report.csv
           fi
         env:
           SF_LAZY_LOAD_MODULES: 'true'
           SF_AUTOUPDATE_DISABLE: 'true'
+          SF_DISABLE_AUTOUPDATE: 'true'
 
-      # Step 7: Block commit if severity 3 or higher issues are found
-      - name: Block Commit if Violations are Found
+      - name: Block commit if violations are found
         run: |
-          if [ -f "scanner-report.json" ]; then
-            severity_fail_count=$(grep -oP '"severity":\s*(3|5|1)' scanner-report.json | wc -l)
-            echo "Severity Fail Count: $severity_fail_count"
+          if [ -f scanner-report.csv ]; then
+            severity_fail_count=$(jq '[.violations[] | select(.severity == 3)] | length' scanner-report.csv)
+            echo "Severity 3 issues count: $severity_fail_count"
             if [ "$severity_fail_count" -gt 0 ]; then
-              echo "Blocking commit due to severity 3 or higher violations."
+              echo "Blocking your push due to severity 3 vulnerabilities found."
               exit 1
             else
-              echo "No severity 3 or higher violations found."
+              echo "No severity 3 vulnerabilities found. Proceeding."
             fi
           else
             echo "No scanner report found."
-            exit 0
+            exit 1
           fi
 
-      # Step 8: Upload report artifacts (optional, in case you want to review them)
-      - name: Upload Scanner Report as Artifact
+      - name: Upload Scanner Report
         if: success()
         uses: actions/upload-artifact@v3
         with:
-          name: SFDX_Scanner_Report
-          path: scanner-report.json
+          name: SFDX_Code_Scan_Report
+          path: scanner-report.csv
