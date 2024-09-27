@@ -39,7 +39,7 @@ public with sharing class DummyAccountClass {
                 }
             }
             insert accList;
-            System.debug('welcome to bugsss');
+            System.debug('welcome to bugs bunny');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
@@ -65,7 +65,7 @@ public with sharing class DummyAccountClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
-                System.debug('Welcome Nareshhh');
+                System.debug('Welcome Naresh babu');
             }
         } else {
             throw new CustomException('You do not have permission to create Opportunity records.');
