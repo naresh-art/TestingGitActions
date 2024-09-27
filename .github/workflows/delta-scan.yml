@@ -78,13 +78,13 @@ jobs:
             echo "Scanner report CSV file not found."
             exit 1
           fi
-
+ 
       - name: Upload Scanner Report as Artifact
         uses: actions/upload-artifact@v3
         with:
             name: scanner-report.csv
             path: scanner-report.csv
-
+ 
       - name: Check Scanner Report Severity
         id: check_severity
         run: |
@@ -110,10 +110,30 @@ jobs:
               echo "QUALITY_GATE_STATUS=PASSED" >> $GITHUB_ENV
               echo "::notice::Quality gate passed."
             fi
-
-      - name: Post PR Comment if Quality Gate Fails
+ 
+      - name: Manual Approval Step
         if: failure()
-        uses: thollander/actions-comment-pull-request@v1
+        uses: actions/github-script@v3
+        id: approval_step
         with:
-          message: "Quality gate failed due to high severity issues in the SFDX Code Scan. Please address these issues."
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: reviews } = await github.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number
+            });
+            const approved = reviews.find(review => review.state === "APPROVED");
+            if (approved) {
+              core.setOutput("manual_approval", "APPROVED");
+            } else {
+              core.setOutput("manual_approval", "REJECTED");
+            }
+ 
+      - name: Approve PR if Approved
+        if: steps.approval_step.outputs.manual_approval == 'APPROVED'
+        run: echo "Pull request approved manually. Proceeding with the merge."
+ 
+      - name: Reject PR if Rejected
+        if: steps.approval_step.outputs.manual_approval == 'REJECTED'
+        run: |
+          echo "Pull request rejected. No further action will be taken."
