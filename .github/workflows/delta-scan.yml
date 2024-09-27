@@ -25,14 +25,25 @@ jobs:
       - name: Verify Salesforce CLI Installation
         run: sf --version
 
-      - name: Stash the changes temporarily
-        run: |
-          git stash # Stashing the changes temporarily
+      - name: Verify Scanner Plugin Installation
+        run: sf plugins --core
 
-      - name: Run SFDX Scanner on Stashed Changes
+      - name: Get changed files
+        id: get-changes
         run: |
-          git stash pop # Apply the stashed changes
-          files=$(git diff --name-only | grep -E '\.cls$|\.lwc$' || true)
+          git fetch --unshallow || true
+          if [ "$(git rev-list --count HEAD)" -gt "1" ]; then
+            echo "Fetching changed files between HEAD~1 and HEAD"
+            git diff --name-only HEAD~1 HEAD > changed_files.txt
+          else
+            echo "No previous commit to compare to." > changed_files.txt
+          fi
+          cat changed_files.txt
+
+      - name: Run SFDX Scanner on Changed Files
+        id: run-scanner
+        run: |
+          files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
           if [ -n "$files" ]; then
             sf scanner:run --target "$files" --format csv --outfile scanner-report.csv || { echo "Scanner run failed"; exit 1; }
@@ -45,26 +56,26 @@ jobs:
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
 
-      - name: Block commit and push if severity 3 violations are found
+      - name: Block commit if severity 3 violations are found
         run: |
           if [ -f scanner-report.csv ]; then
+            # Assuming 'severity' is the third column in the CSV
             severity_fail_count=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner-report.csv)
             echo "Severity 3 issues count: $severity_fail_count"
             if [ "$severity_fail_count" -gt 0 ]; then
-              echo "Blocking push due to severity 3 vulnerabilities found."
-              exit 1 # Exit with failure if violations are found
+              echo "Blocking your push due to severity 3 vulnerabilities found."
+              exit 1
             else
               echo "No severity 3 vulnerabilities found. Proceeding."
             fi
           else
             echo "No scanner report found."
-            exit 1 # Fail the job if no scanner report is found
+            exit 1
+          fi
 
-      - name: Commit and Push changes (if scan passes)
+      - name: Upload Scanner Report
         if: success()
-        run: |
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
-          git add . # Re-add the changes
-          git commit -m "Auto commit after successful code scan"
-          git push origin HEAD
+        uses: actions/upload-artifact@v3
+        with:
+          name: SFDX_Code_Scan_Report
+          path: scanner-report.csv "
