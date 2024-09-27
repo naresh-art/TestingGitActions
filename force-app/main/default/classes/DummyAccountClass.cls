@@ -39,6 +39,7 @@ public with sharing class DummyAccountClass {
                 }
             }
             insert accList;
+            System.debug('welcome to bugss');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
