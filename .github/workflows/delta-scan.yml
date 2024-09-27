@@ -46,31 +46,21 @@ jobs:
           files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
           if [ -n "$files" ]; then
-            sf scanner:run --target "$files" --format json --outfile scanner-report.json || { echo "Scanner run failed"; exit 1; }
+            sf scanner:run --target "$files" --format csv --outfile scanner-report.csv || { echo "Scanner run failed"; exit 1; }
           else
             echo "No relevant files changed."
-            touch scanner-report.json
+            touch scanner-report.csv
           fi
         env:
           SF_LAZY_LOAD_MODULES: 'true'
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
 
-      - name: Print scanner report JSON structure
+      - name: Block commit if severity 3 violations are found
         run: |
-          if [ -f scanner-report.json ]; then
-            echo "Displaying the scanner-report.json structure for debugging:"
-            cat scanner-report.json
-          else
-            echo "No scanner report found."
-            exit 1
-          fi
-
-      - name: Block commit if violations are found
-        run: |
-          if [ -f scanner-report.json ]; then
-            # Adjust this according to the actual structure of your JSON report
-            severity_fail_count=$(jq '[.violations[] | select(.severity == 3)] | length' scanner-report.json)
+          if [ -f scanner-report.csv ]; then
+            # Assuming 'severity' is the third column in the CSV
+            severity_fail_count=$(awk -F',' '$3 == 3 {count++} END {print count}' scanner-report.csv)
             echo "Severity 3 issues count: $severity_fail_count"
             if [ "$severity_fail_count" -gt 0 ]; then
               echo "Blocking your push due to severity 3 vulnerabilities found."
@@ -88,4 +78,4 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: SFDX_Code_Scan_Report
-          path: scanner-report.json
+          path: scanner-report.csv
