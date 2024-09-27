@@ -74,12 +74,6 @@ jobs:
             exit 1
           fi
 
-      - name: Upload Scanner Report as Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.FILE_TITLE }}
-          path: scanner-report.csv
-
       - name: Check Scanner Report Severity
         id: check_severity
         run: |
@@ -132,7 +126,12 @@ jobs:
           FILE_TITLE="Code Scanner Delta Report_${REPO_NAME}_${BRANCH_NAME}_${COMMIT_LABEL}"
           echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
 
-
+      - name: Upload Scanner Report as Artifact (always create)
+        if: always()  # Ensures the report is uploaded even if there are violations
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.FILE_TITLE }}
+          path: scanner-report.csv
 
       - name: Get Pusher's Email
         id: get-pusher-email
@@ -181,3 +180,4 @@ jobs:
           SF_ACCESS_TOKEN: ${{ secrets.SF_ACCESS_TOKEN }}
         shell: bash
 
+        
