@@ -46,10 +46,10 @@ jobs:
           files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
           if [ -n "$files" ]; then
-            sf scanner:run --target "$files" --format json --outfile scanner-report.csv || { echo "Scanner run failed"; exit 1; }
+            sf scanner:run --target "$files" --format json --outfile scanner-report.json || { echo "Scanner run failed"; exit 1; }
           else
             echo "No relevant files changed."
-            touch scanner-report.csv
+            touch scanner-report.json
           fi
         env:
           SF_LAZY_LOAD_MODULES: 'true'
@@ -58,8 +58,8 @@ jobs:
 
       - name: Block commit if violations are found
         run: |
-          if [ -f scanner-report.csv ]; then
-            severity_fail_count=$(jq '[.violations[] | select(.severity == 3)] | length' scanner-report.csv)
+          if [ -f scanner-report.json ]; then
+            severity_fail_count=$(jq '[.violations[] | select(.severity == 3)] | length' scanner-report.json)
             echo "Severity 3 issues count: $severity_fail_count"
             if [ "$severity_fail_count" -gt 0 ]; then
               echo "Blocking your push due to severity 3 vulnerabilities found."
@@ -77,4 +77,4 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: SFDX_Code_Scan_Report
-          path: scanner-report.csv
+          path: scanner-report.json
