@@ -46,23 +46,14 @@ jobs:
         id: run-scanner
         run: |
           # Create an empty CSV file
-          echo "Rule Name,File,Line,Category,Severity,Message" > scanner-report.csv
-
           # Find all Apex (.cls) and LWC files and scan them
           files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
           if [ -n "$files" ]; then
-            for file in $files; do
-              echo "Running scanner on $file"
-              # Append results to the existing CSV file
-              sf scanner:run --target "$file" --format csv --outfile temp-scanner-report.csv --category "Performance"
-              # Append the scanned results into scanner-report.csv
-              tail -n +2 temp-scanner-report.csv >> scanner-report.csv
-            done
-            # Clean up the temporary file
-            rm temp-scanner-report.csv
+              sf scanner:run --target "$files" --format "csv" --outfile "scanner-report.csv" || { echo "Scanner run failed"; exit 1; }
           else
             echo "No relevant files changed."
+            touch scanner-report.csv
           fi
         env:
           SF_LAZY_LOAD_MODULES: 'true'
