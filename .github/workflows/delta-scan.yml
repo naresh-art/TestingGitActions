@@ -78,7 +78,13 @@ jobs:
             echo "Scanner report CSV file not found."
             exit 1
           fi
- 
+
+      - name: Upload Scanner Report as Artifact
+        uses: actions/upload-artifact@v3
+        with:
+            name: scanner-report.csv
+            path: scanner-report.csv
+
       - name: Check Scanner Report Severity
         id: check_severity
         run: |
@@ -104,13 +110,7 @@ jobs:
               echo "QUALITY_GATE_STATUS=PASSED" >> $GITHUB_ENV
               echo "::notice::Quality gate passed."
             fi
- 
-      - name: Upload Scanner Report as Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: scanner-report.csv
-          path: scanner-report.csv
- 
+
       - name: Post PR Comment if Quality Gate Fails
         if: failure()
         uses: thollander/actions-comment-pull-request@v1
