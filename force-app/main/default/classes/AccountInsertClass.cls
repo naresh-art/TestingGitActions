@@ -57,7 +57,7 @@ public with sharing class AccountInsertClass {
      * @param accList The list of Account records to be inserted data.
      * @throws CustomException If the user lacks permission to insert accounts.
      */
-    public static void InsertNewAccount(List<Account> accList){
+    public static void insertNewAccount(List<Account> accList){
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
