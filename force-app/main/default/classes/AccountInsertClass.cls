@@ -65,7 +65,6 @@ public with sharing class AccountInsertClass {
                 }
             }
             insert accList;
-            System.debug('Naresh Testing for PMD Rules old branch to new branches one file:');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }

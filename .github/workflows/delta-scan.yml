@@ -41,7 +41,7 @@ jobs:
             echo "No previous commit to compare to." > changed_files.txt
           fi
           cat changed_files.txt
-          
+
       - name: Run SFDX Scanner on Changed Files
         if: success()
         run: |
@@ -103,8 +103,11 @@ jobs:
  
       - name: Post PR Comment if Quality Gate Fails
         if: failure()
-        uses: thollander/actions-comment-pull-request@v1
-        with:
-          message: "Quality gate failed due to high severity issues in the SFDX Code Scan. Please address these issues."
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -X POST \
+          -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{
+          github.repository }}/issues/${{ github.event.pull_request.number }}/comments \
+              -d '{"body": "Quality gate failed due to high severity issues in the SFDX Code Scan. Please address these issues."}'
  
