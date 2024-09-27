@@ -63,49 +63,52 @@ jobs:
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
 
-      - name: Check Scanner Report Severity and Generate Violation CSV
+      - name: Encode CSV file to Base64
+        if: success()
+        id: encode_file
+        run: |
+          if [ -f scanner-report.csv ]; then
+            base64 scanner-report.csv | tr -d '\n' > encoded_report.txt
+          else
+            echo "Scanner report CSV file not found."
+            exit 1
+          fi
+
+      - name: Check Scanner Report Severity
         id: check_severity
         run: |
-          if [ ! -f "scanner-report.csv" ]; then
-            echo "Scanner report not found!"
-            echo "QUALITY_GATE_STATUS=FAILED" >> $GITHUB_ENV
-            echo "::error file=scanner-report.csv::Scanner report not found!"
-            exit 1
-          fi
-          
-          echo "Checking scanner report content:"
-          cat scanner-report.csv
-          
-          SEVERITY_FAIL_COUNT=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner-report.csv)
-          SEVERITY_FAIL_COUNT=${SEVERITY_FAIL_COUNT:-0}
-          echo "Severity 3 Count: $SEVERITY_FAIL_COUNT"
-          
-          echo "Filename,Severity,Description" > violation_report.csv
-          if [ "$SEVERITY_FAIL_COUNT" -gt 0 ]; then
-            echo "Quality gate failed due to high severity issues."
-            echo "QUALITY_GATE_STATUS=FAILED" >> $GITHUB_ENV
-            awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") print $1","$2",Severity 3 violation"}' scanner-report.csv >> violation_report.csv
-            exit 1
-          else
-            echo "Quality gate passed."
-            echo "QUALITY_GATE_STATUS=PASSED" >> $GITHUB_ENV
-            echo "No violations,0,No severity 3 issues found" >> violation_report.csv
-          fi
-
-      - name: Upload Violation Report as Artifact (always create)
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: "Violation_Report_${{ github.sha }}"
-          path: violation_report.csv
+            if [ ! -f "scanner-report.csv" ]; then
+              echo "Scanner report not found!"
+              echo "QUALITY_GATE_STATUS=FAILED" >> $GITHUB_ENV
+              echo "::error file=scanner-report.csv::Scanner report not found!"
+              exit 1
+            fi
+       
+            echo "Checking scanner report content:"
+            cat scanner-report.csv  # Print CSV content to see what's inside
+           
+            SEVERITY_FAIL_COUNT=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner-report.csv)
+            SEVERITY_FAIL_COUNT=${SEVERITY_FAIL_COUNT:-0}  # Default to 0 if SEVERITY_FAIL_COUNT is empty
+            echo "Severity 3 Count: $SEVERITY_FAIL_COUNT"
+       
+            if [ "$SEVERITY_FAIL_COUNT" -gt 0 ]; then
+              echo "Quality gate failed due to high severity issues."
+              echo "QUALITY_GATE_STATUS=FAILED" >> $GITHUB_ENV
+              echo "::error::Quality gate failed due to high severity issues."
+              exit 1  # Fail the workflow and block the commit
+            else
+              echo "Quality gate passed."
+              echo "QUALITY_GATE_STATUS=PASSED" >> $GITHUB_ENV
+              echo "::notice::Quality gate passed."
+            fi
 
       - name: Revert changes if quality gate fails and push the reset commit
-        if: failure()
+        if: failure()  # If the quality gate failed
         env:
-          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}  # Use the PAT token instead of GITHUB_TOKEN
         run: |
-          git reset --hard HEAD~1
-          git push --force "https://x-access-token:${PAT_TOKEN}@github.com/${{ github.repository }}".git HEAD
+          git reset --hard HEAD~1  # Reset the branch to remove the failed commit
+          git push --force "https://x-access-token:${PAT_TOKEN}@github.com/${{ github.repository }}".git HEAD  # Force push to remove the failed commit
 
       - name: Debug Git Status and Logs (optional)
         if: failure()
@@ -119,17 +122,16 @@ jobs:
         run: |
           REPO_NAME=$(echo $GITHUB_REPOSITORY | cut -d'/' -f2)
           BRANCH_NAME=$(echo $GITHUB_REF | sed 's/refs\/heads\///')
-          COMMIT_LABEL=$(git log -1 --pretty=format:'%s' | tr -d '[:space:]')
-          FILE_TITLE="Code_Scanner_Delta_Report_${REPO_NAME}_${BRANCH_NAME}_${COMMIT_LABEL}"
+          COMMIT_LABEL=$(git log -1 --pretty=format:'%s')
+          FILE_TITLE="Code Scanner Delta Report_${REPO_NAME}_${BRANCH_NAME}_${COMMIT_LABEL}"
           echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
 
-      - name: Upload Scanner Report as Artifact (always create)
-        if: always()
+      - name: Upload Scanner Report as Artifact
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.FILE_TITLE }}
           path: scanner-report.csv
-          
+
       - name: Get Pusher's Email
         id: get-pusher-email
         run: |
@@ -140,7 +142,7 @@ jobs:
           echo "PUSHER_EMAIL=${PUSHER_EMAIL}" >> $GITHUB_ENV
 
       - name: Upload CSV Report to Salesforce
-        if: success() && env.QUALITY_GATE_STATUS == 'PASSED'
+        if: success() && env.QUALITY_GATE_STATUS == 'PASSED'  # Only upload if quality gate passed
         run: |
           if [ -s encoded_report.txt ]; then
             contentDocumentResponse=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/ContentVersion/ \
