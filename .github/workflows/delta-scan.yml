@@ -42,20 +42,17 @@ jobs:
           fi
           cat changed_files.txt
 
-      - name: Run SFDX Scanner on Each File Individually
+      - name: Run SFDX Scanner on Changed Files
         if: success()
         run: |
             files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
             echo "Files to scan: $files"
             if [ -n "$files" ]; then
-              for file in $files; do
-                echo "Scanning file: $file"
-                sf scanner:run --target "$file" --format "csv" --outfile "scanner-report-$file.csv" || { echo "Scanner run failed"; exit 1; }
-              done
-              # Combine individual scanner reports into a single file
-              echo "Combining all scanner reports into one."
-              head -n 1 scanner-report-$(echo $files | cut -d' ' -f1).csv > scanner-report.csv
-              tail -n +2 -q scanner-report-*.csv >> scanner-report.csv
+              # Convert newline-separated file list into space-separated list for the scanner
+              files=$(echo "$files" | tr '\n' ' ')
+              echo "Scanning files: $files"
+              # Run scanner for multiple files
+              sf scanner:run --target "$files" --format "csv" --outfile "scanner-report.csv" || { echo "Scanner run failed"; exit 1; }
             else
               echo "No relevant files changed."
               touch scanner-report.csv
