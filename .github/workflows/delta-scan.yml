@@ -69,12 +69,13 @@ jobs:
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
 
-      - name: Parse Violations and Post as PR Comment
+      - name: Parse Violations and Set Output
         id: parse-and-comment
         run: |
           if [ -f scanner-report.csv ]; then
             # Format the CSV report into a markdown message
             violations=$(awk -F',' 'NR>1 {printf "🔴 **File:** %s\n🔸 **Line:** %s\n🔸 **Severity:** %s\n🔸 **Message:** %s\n\n", $2, $3, $5, $6}' scanner-report.csv)
+            echo "$violations"
             echo "::set-output name=violations::${violations}"
           else
             echo "No scanner report found."
@@ -91,9 +92,11 @@ jobs:
               repo: context.repo.repo,
               body: `
               ### Salesforce Code Scanner Violations:
-              ${steps.parse-and-comment.outputs.violations}
+              ${process.env.VIOLATIONS}
               `
             })
+        env:
+          VIOLATIONS: ${{ steps.parse-and-comment.outputs.violations }}
 
       - name: Block PR merge if severity 3 violations are found
         run: |
