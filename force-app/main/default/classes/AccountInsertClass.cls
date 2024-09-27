@@ -65,7 +65,7 @@ public with sharing class AccountInsertClass {
                 }
             }
             insert accList;
-            System.debug('Naresh Testing on PMD:');
+            System.debug('Naresh Testing on PMD friday:');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
