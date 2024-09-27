@@ -28,11 +28,6 @@ jobs:
       - name: Verify Scanner Plugin Installation
         run: sf plugins --core
 
-      - name: Stash changes before scan
-        run: |
-          git stash --include-untracked
-          echo "Changes stashed."
-
       - name: Get changed files
         id: get-changes
         run: |
@@ -68,6 +63,7 @@ jobs:
             echo "Severity 3 issues count: $severity_fail_count"
             if [ "$severity_fail_count" -gt 0 ]; then
               echo "Blocking your push due to severity 3 vulnerabilities found."
+              git reset --hard HEAD~1  # Undo the commit before exiting
               exit 1
             else
               echo "No severity 3 vulnerabilities found. Proceeding."
@@ -84,17 +80,9 @@ jobs:
           name: SFDX_Code_Scan_Report
           path: scanner-report.csv
 
-      - name: Pop the stashed changes
-        if: success()
-        run: |
-          git stash pop
-          echo "Changes popped from stash."
-
-      - name: Commit and push changes if no violations
+      - name: Push changes to branch
         if: success()
         run: |
           git config --global user.name "naresh-art"
           git config --global user.email "nareshpunagani316@gmail.com"
-          git add .
-          git commit -m "Changes committed after successful code scan"
           git push origin HEAD:${{ github.ref }}
