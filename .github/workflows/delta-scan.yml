@@ -69,29 +69,21 @@ jobs:
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
 
-      - name: Check Severity 3 Violations and Comment on PR
-        id: check-severity
+      - name: Block PR merge if severity 3 violations are found
         run: |
-          violations=$(awk -F',' '{gsub(/^ *| *$/, "", $5); if($5 == "\"3\"") print "Rule: " $1 "\nFile: " $2 "\nLine: " $3 "\nSeverity: " $5 "\nMessage: " $6 "\n\n"; }' scanner-report.csv)
-          if [ -n "$violations" ]; then
-            echo "::set-output name=severity_violations::$violations"
-            exit 1
+          if [ -f scanner-report.csv ]; then
+            severity_fail_count=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner-report.csv)
+            echo "Severity 3 issues count: $severity_fail_count"
+            if [ "$severity_fail_count" -gt 0 ]; then
+              echo "Blocking your pull request due to severity 3 vulnerabilities found."
+              exit 1
+            else
+              echo "No severity 3 vulnerabilities found. Proceeding."
+            fi
           else
-            echo "No severity 3 vulnerabilities found."
+            echo "No scanner report found."
+            exit 1
           fi
-
-      - name: Comment on the Pull Request
-        if: failure() # Only comment if there are violations
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const violations = process.env.SEVERITY_VIOLATIONS;
-            github.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `### SFDX Scanner Violations\n\n${violations}`
-            })
 
       - name: Upload Scanner Report
         if: always()
