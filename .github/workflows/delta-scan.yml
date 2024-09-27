@@ -56,7 +56,7 @@ jobs:
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
 
-      - name: Block commit if severity 3 violations are found
+      - name: Block push if severity 3 violations are found
         run: |
           if [ -f scanner-report.csv ]; then
             # Assuming 'severity' is the third column in the CSV
@@ -73,9 +73,9 @@ jobs:
             exit 1
           fi
 
-      - name: Upload Scanner Report
+      - name: Push changes to branch
         if: success()
-        uses: actions/upload-artifact@v3
-        with:
-          name: SFDX_Code_Scan_Report
-          path: scanner-report.csv
+        run: |
+          git config --global user.email "your-email@example.com"
+          git config --global user.name "Your Name"
+          git push origin HEAD

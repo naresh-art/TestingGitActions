@@ -64,7 +64,7 @@ public with sharing class DummyAccountClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
-                System.debug('welcome to new changes data:');
+                System.debug('welcome to new changes bulchit:');
             }
         } else {
             throw new CustomException('You do not have permission to create Opportunity records.');
