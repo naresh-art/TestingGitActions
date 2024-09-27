@@ -56,9 +56,20 @@ jobs:
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
 
+      - name: Print scanner report JSON structure
+        run: |
+          if [ -f scanner-report.json ]; then
+            echo "Displaying the scanner-report.json structure for debugging:"
+            cat scanner-report.json
+          else
+            echo "No scanner report found."
+            exit 1
+          fi
+
       - name: Block commit if violations are found
         run: |
           if [ -f scanner-report.json ]; then
+            # Adjust this according to the actual structure of your JSON report
             severity_fail_count=$(jq '[.violations[] | select(.severity == 3)] | length' scanner-report.json)
             echo "Severity 3 issues count: $severity_fail_count"
             if [ "$severity_fail_count" -gt 0 ]; then
