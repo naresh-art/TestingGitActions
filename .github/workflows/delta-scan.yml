@@ -104,7 +104,7 @@ jobs:
       - name: Revert changes if quality gate fails and push the reset commit
         if: failure()  # If the quality gate failed
         env:
-          PAT_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Use the PAT token instead of GITHUB_TOKEN
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}  # Use the PAT token instead of GITHUB_TOKEN
         run: |
           git reset --hard HEAD~1  # Reset the branch to remove the failed commit
           git push --force "https://x-access-token:${PAT_TOKEN}@github.com/${{ github.repository }}".git HEAD  # Force push to Dev3Mnr branch
@@ -178,3 +178,16 @@ jobs:
           SF_ACCESS_TOKEN: ${{ secrets.SF_ACCESS_TOKEN }}
         shell: bash
  
+      - name: Send Email with actions-send-mail
+        uses: dawidd6/action-send-mail@v3
+        if: env.QUALITY_GATE_STATUS == 'PASSED'  # Only send email if quality gate passed
+        with:
+          server_address: 'smtp.gmail.com'
+          server_port: '587'
+          username: ${{ secrets.GMAIL_EMAIL }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          from: ${{ secrets.GMAIL_EMAIL }}
+          subject: 'SFDX Code Scan Delta Report'
+          body: 'Please find the attached SFDX Code Scan Delta Report.'
+          to: ${{ env.PUSHER_EMAIL }}, ${{ secrets.GMAIL_EMAIL }}
+          attachments: scanner-report.csv
