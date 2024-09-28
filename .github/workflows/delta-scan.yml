@@ -101,7 +101,15 @@ jobs:
               echo "QUALITY_GATE_STATUS=PASSED" >> $GITHUB_ENV
               echo "::notice::Quality gate passed."
             fi
-            
+
+      # Upload the scanner report even if quality gate fails
+      - name: Upload Scanner Report as Artifact
+        if: always()  # Ensure file is uploaded regardless of pass/fail
+        uses: actions/upload-artifact@v3
+        with:
+          name: scanner-report
+          path: scanner-report.csv
+
       - name: Get Repository and Branch Info
         id: get-info
         run: |
@@ -110,12 +118,6 @@ jobs:
           COMMIT_LABEL=$(git log -1 --pretty=format:'%s')
           FILE_TITLE="Code Scanner Delta Report_${REPO_NAME}_${BRANCH_NAME}_${COMMIT_LABEL}"
           echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
-
-      - name: Upload Scanner Report as Artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: ${{ env.FILE_TITLE }}
-          path: scanner-report.csv
 
       - name: Get Pusher's Email
         id: get-pusher-email
