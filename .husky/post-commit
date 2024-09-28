@@ -6,12 +6,30 @@ current_branch=$(git rev-parse --abbrev-ref HEAD)
 # Log the branch name to a file
 echo "Pushing changes to branch: $current_branch" >> .husky/post-commit.log
 
-# Automatically push changes to the current branch
-git push origin "$current_branch"
+# Create a temporary branch name with a timestamp
+temp_branch="temp-branch-$(date +%Y%m%d%H%M%S)"
+
+# Checkout the temporary branch
+git checkout -b "$temp_branch"
+
+# Push the changes to the temporary branch
+git push origin "$temp_branch"
 
 # Log the success or failure of the push operation
 if [ $? -eq 0 ]; then
-  echo "Successfully pushed changes to $current_branch" >> .husky/post-commit.log
+  echo "Successfully pushed changes to $temp_branch" >> .husky/post-commit.log
+
+  # Automatically create a pull request from the temp branch to the current branch
+  hub pull-request -b "$current_branch" -h "$temp_branch" -m "Auto PR from $temp_branch to $current_branch"
+  
+  if [ $? -eq 0 ]; then
+    echo "Successfully created pull request from $temp_branch to $current_branch" >> .husky/post-commit.log
+  else
+    echo "Failed to create pull request from $temp_branch to $current_branch" >> .husky/post-commit.log
+  fi
 else
-  echo "Failed to push changes to $current_branch" >> .husky/post-commit.log
+  echo "Failed to push changes to $temp_branch" >> .husky/post-commit.log
 fi
+
+# Switch back to the original branch
+git checkout "$current_branch"
