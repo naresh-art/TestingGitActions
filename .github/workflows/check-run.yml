@@ -1,9 +1,6 @@
 name: SFDX Code Scan Delta
 
 on:
-  push:
-    branches:
-      - '**'
   check_run:
     types: [created, rerequested]
 
@@ -103,6 +100,7 @@ jobs:
               echo "::notice::Quality gate passed."
             fi
 
+      # Upload the scanner report even if quality gate fails
       - name: Upload Scanner Report as Artifact
         if: always()  # Ensure file is uploaded regardless of pass/fail
         uses: actions/upload-artifact@v3
