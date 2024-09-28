@@ -8,6 +8,8 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
+  checks: write
 
 jobs:
   installcli:
@@ -52,7 +54,6 @@ jobs:
           files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
           if [ -n "$files" ]; then
-            # Scan multiple files by passing them as space-separated values
             sf scanner:run --target $(echo "$files") --format "csv" --outfile "scanner-report.csv" || { echo "Scanner run failed"; exit 1; }
           else
             echo "No relevant files changed."
@@ -83,14 +84,14 @@ jobs:
               echo "::error file=scanner-report.csv::Scanner report not found!"
               exit 1
             fi
-       
+
             echo "Checking scanner report content:"
-            cat scanner-report.csv  # Print CSV content to see what's inside
-           
+            cat scanner-report.csv
+
             SEVERITY_FAIL_COUNT=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner-report.csv)
             SEVERITY_FAIL_COUNT=${SEVERITY_FAIL_COUNT:-0}  # Default to 0 if SEVERITY_FAIL_COUNT is empty
             echo "Severity 3 Count: $SEVERITY_FAIL_COUNT"
-       
+
             if [ "$SEVERITY_FAIL_COUNT" -gt 0 ]; then
               echo "Quality gate failed due to high severity issues."
               echo "QUALITY_GATE_STATUS=FAILED" >> $GITHUB_ENV
@@ -128,42 +129,36 @@ jobs:
             "https://api.github.com/repos/${REPO}/commits/${COMMIT_SHA}" | jq -r '.commit.committer.email')
           echo "PUSHER_EMAIL=${PUSHER_EMAIL}" >> $GITHUB_ENV
 
-      - name: Upload CSV Report to Salesforce
-        if: success() && env.QUALITY_GATE_STATUS == 'PASSED'  # Only upload if quality gate passed
-        run: |
-          if [ -s encoded_report.txt ]; then
-            contentDocumentResponse=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/ContentVersion/ \
-              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "Title": "'"${{ env.FILE_TITLE }}"'",
-                "PathOnClient": "scanner-report.csv",
-                "VersionData": "'"$(cat encoded_report.txt)"'"
-              }')
-            echo "Response: $contentDocumentResponse"
-           
-            contentVersionId=$(echo $contentDocumentResponse | jq -r '.id // empty')
-            if [ -z "$contentVersionId" ]; then
-              echo "Error: Failed to upload file. No ContentVersionId found."
-              exit 1
-            fi
-            echo "ContentVersionId: $contentVersionId"
-           
-            contentDocumentResponse=$(curl -X GET https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/ContentVersion/$contentVersionId \
-              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}")
-            echo "ContentDocument Response: $contentDocumentResponse"
-           
-            contentDocumentId=$(echo $contentDocumentResponse | jq -r '.ContentDocumentId // empty')
-            if [ -z "$contentDocumentId" ]; then
-              echo "Error: Failed to retrieve ContentDocumentId. No ContentDocumentId found."
-              exit 1
-            fi
-            echo "ContentDocumentId: $contentDocumentId"
-          else
-            echo "No scanner report generated, skipping upload."
-          fi
-        env:
-          SF_ACCESS_TOKEN: ${{ secrets.SF_ACCESS_TOKEN }}
-        shell: bash
+  # Approval Job for Lead Contributor
+  approval:
+    needs: installcli  # Approval happens after quality gate check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request Approval from Lead
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const {data: reviewRequests} = await github.pulls.createReviewRequest({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              reviewers: ['Prasanthkys'}']  # Add lead contributor's GitHub username
+            });
+            core.setOutput("review_requests", reviewRequests);
 
-        
+      - name: Await Approval
+        run: |
+          echo "Waiting for lead approval..."
+          # Logic to wait for approval
+          # Can be enhanced with polling or webhook to check approval status.
+
+  # Deployment Job (only runs if the lead approves)
+  deploy:
+    needs: approval  # Deploy only after approval
+    if: success()  # Ensure it runs only after successful approval
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Salesforce
+        run: |
+          echo "Deploying the changes to Salesforce..."
+          sf deploy metadata --target-org ${{ secrets.SALESFORCE_ORG_ALIAS }} --source-dir "force-app"
