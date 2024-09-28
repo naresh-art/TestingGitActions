@@ -1,0 +1,71 @@
+name: SFDX Code Scan Delta
+
+on:
+  workflow_run:
+    workflows: ["Push to Branch Workflow"]
+    types:
+      - completed
+
+jobs:
+  installcli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20.x
+
+      - name: Install CLI
+        run: npm install @salesforce/cli --global
+
+      - name: Install Scanner Plugin
+        run: sf plugins install @salesforce/sfdx-scanner
+
+      - name: Verify SFDX CLI Installation
+        run: sf --version
+
+      - name: Verify SFDX Scanner Plugin Installation
+        run: sf plugins --core
+
+      - name: Get changed files
+        id: get-changes
+        run: |
+          git fetch --unshallow || true
+          if [ "$(git rev-list --count HEAD)" -gt "1" ]; then
+            git diff --name-only HEAD~1 HEAD > changed_files.txt
+          else
+            echo "No previous commit to compare to." > changed_files.txt
+          fi
+          cat changed_files.txt
+
+      - name: Run SFDX Scanner on Changed Files
+        if: success()
+        run: |
+          files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
+          if [ -n "$files" ]; then
+            sf scanner:run --target $(echo "$files") --format "csv" --outfile "scanner-report.csv" || exit 1
+          else
+            touch scanner-report.csv
+          fi
+
+      - name: Check Scanner Report Severity
+        id: check_severity
+        run: |
+          SEVERITY_FAIL_COUNT=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner-report.csv)
+          SEVERITY_FAIL_COUNT=${SEVERITY_FAIL_COUNT:-0}
+          if [ "$SEVERITY_FAIL_COUNT" -gt 0 ]; then
+            echo "Quality gate failed."
+            exit 1
+          else
+            echo "Quality gate passed."
+          fi
+
+      - name: Upload Scanner Report as Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: scanner-report
+          path: scanner-report.csv

@@ -45,6 +45,7 @@ public with sharing class AccountInsertClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
+                System.debug('welcome to weekends');
             }
         } else {
             throw new CustomException('You do not have permission to create Opportunity records.');
@@ -65,7 +66,7 @@ public with sharing class AccountInsertClass {
                 }
             }
             insert accList;
-            System.debug('welcome Saturday Bugs Bunny Test New');
+            System.debug('welcome Saturday Bugs Bunny Test Data');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
