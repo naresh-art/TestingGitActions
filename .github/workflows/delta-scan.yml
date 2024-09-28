@@ -92,7 +92,7 @@ jobs:
             SEVERITY_FAIL_COUNT=${SEVERITY_FAIL_COUNT:-0}  # Default to 0 if SEVERITY_FAIL_COUNT is empty
             echo "Severity 3 Count: $SEVERITY_FAIL_COUNT"
 
-            if [ "$SEVERITY_FAIL_COUNT" -gt 0 ]; then
+            if (SEVERITY_FAIL_COUNT > 0); then
               echo "Quality gate failed due to high severity issues."
               echo "QUALITY_GATE_STATUS=FAILED" >> $GITHUB_ENV
               echo "::error::Quality gate failed due to high severity issues."
@@ -110,32 +110,32 @@ jobs:
           name: scanner-report
           path: scanner-report.csv
 
-  # Approval Job for Lead Contributor
+  # Approval Job for Lead Contributor (naresh-art)
   approval:
     needs: installcli  # Approval happens after quality gate check
     runs-on: ubuntu-latest
     steps:
-      - name: Request Approval from Lead
+      - name: Request Approval from Lead (naresh-art)
         uses: actions/github-script@v6
         with:
           script: |
-            const {data: reviewRequests} = await github.pulls.createReviewRequest({
+            const response = await github.pulls.createReviewRequest({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.payload.pull_request.number,
-              reviewers: ['Prasanthkys']  # Add lead contributor's GitHub username
+              reviewers: ['Prasanthkys']  # Request approval from naresh-art
             });
-            core.setOutput("review_requests", reviewRequests);
+            core.setOutput("review_requests", JSON.stringify(response));
 
       - name: Await Approval Decision
-        uses: actions/github-script@v6
         id: approval_status
+        uses: actions/github-script@v6
         with:
           script: |
-            const {data: reviews} = await github.pulls.listReviews({
+            const { data: reviews } = await github.pulls.listReviews({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number
+              pull_number: context.payload.pull_request.number,
             });
 
             const approval = reviews.find(review => review.state === 'APPROVED');
@@ -146,7 +146,7 @@ jobs:
             } else if (rejection) {
               core.setOutput('APPROVAL_STATUS', 'REJECTED');
             } else {
-              core.setFailed('No approval or rejection decision was found.');
+              throw new Error('No approval or rejection decision was found.');
             }
 
   # Deployment Job (if approval is granted)
@@ -165,7 +165,7 @@ jobs:
           echo "Committing approved changes to the repository..."
           git config --global user.email "${{ steps.get-pusher-email.outputs.PUSHER_EMAIL }}"
           git config --global user.name "GitHub Action"
-          git commit -m "Approved commit by lead contributor"
+          git commit -m "Approved commit by lead contributor naresh-art"
           git push
 
   # Block Commit Job (if rejection is given)
@@ -176,5 +176,5 @@ jobs:
     steps:
       - name: Block Commit
         run: |
-          echo "The changes were rejected. Blocking commit."
+          echo "The changes were rejected by naresh-art. Blocking commit."
           exit 1  # Fail the workflow if rejected
