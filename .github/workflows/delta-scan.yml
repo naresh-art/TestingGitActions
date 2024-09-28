@@ -92,7 +92,7 @@ jobs:
             SEVERITY_FAIL_COUNT=${SEVERITY_FAIL_COUNT:-0}  # Default to 0 if SEVERITY_FAIL_COUNT is empty
             echo "Severity 3 Count: $SEVERITY_FAIL_COUNT"
 
-            if (SEVERITY_FAIL_COUNT > 0); then
+            if [ "$SEVERITY_FAIL_COUNT" -gt 0 ]; then
               echo "Quality gate failed due to high severity issues."
               echo "QUALITY_GATE_STATUS=FAILED" >> $GITHUB_ENV
               echo "::error::Quality gate failed due to high severity issues."
@@ -119,11 +119,11 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const response = await github.pulls.createReviewRequest({
+            const response = await github.pulls.requestReviewers({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.payload.pull_request.number,
-              reviewers: ['Prasanthkys']  # Request approval from naresh-art
+              reviewers: ['Prasanthkys']
             });
             core.setOutput("review_requests", JSON.stringify(response));
 
