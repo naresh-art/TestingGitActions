@@ -20,11 +20,19 @@ if [ $? -eq 0 ]; then
   echo "Successfully pushed changes to $temp_branch" >> .husky/post-commit.log
 
   # Fetch collaborators from GitHub API
-  # Replace 'your-repo-owner' and 'your-repo-name' with actual repository details
-  collaborators=$(curl -s -H "Authorization: token $GIT_TOKEN" \
-    "https://api.github.com/repos/naresh-art/TestingGitActions/collaborators" \
-    | jq -r '.[].login' | paste -sd "," -)
-  
+  raw_response=$(curl -s -H "Authorization: token $GIT_TOKEN" \
+    "https://api.github.com/repos/naresh-art/TestingGitActions/collaborators")
+
+  # Check if there's an error in the response
+  if echo "$raw_response" | jq -e 'has("message")' > /dev/null; then
+    error_message=$(echo "$raw_response" | jq -r '.message')
+    echo "Error: $error_message" >> .husky/post-commit.log
+    exit 1
+  fi
+
+  # Extract collaborator logins
+  collaborators=$(echo "$raw_response" | jq -r '.[] | .login' | paste -sd "," -)
+
   # Log the list of collaborators
   echo "Collaborators: $collaborators" >> .husky/post-commit.log
 
