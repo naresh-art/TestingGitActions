@@ -1,14 +1,14 @@
 name: SFDX Code Scan Delta
-
+ 
 on:
   push:
     branches:
       - '**'
-
+ 
 permissions:
   contents: write
   pull-requests: write
-
+ 
 jobs:
   installcli:
     runs-on: ubuntu-latest
@@ -16,24 +16,24 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
+ 
       - name: Use Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 20.x
-
+ 
       - name: Install CLI
         run: npm install @salesforce/cli --global
-
+ 
       - name: Install Scanner Plugin
         run: sf plugins install @salesforce/sfdx-scanner
-
+ 
       - name: Verify SFDX CLI Installation
         run: sf --version
-
+ 
       - name: Verify SFDX Scanner Plugin Installation
         run: sf plugins --core
-
+ 
       - name: Get changed files
         id: get-changes
         run: |
@@ -45,14 +45,14 @@ jobs:
             echo "No previous commit to compare to." > changed_files.txt
           fi
           cat changed_files.txt
-
+ 
       - name: Run SFDX Scanner on Changed Files
         if: success()
         run: |
           files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
           if [ -n "$files" ]; then
-            sf scanner:run --target $(echo "$files") --format "csv" --outfile "scanner-report.csv" || { echo "Scanner run failed"; exit 1; }
+            sf scanner:run --target "$files" --format "csv" --outfile "scanner-report.csv" || { echo "Scanner run failed"; exit 1; }
           else
             echo "No relevant files changed."
             touch scanner-report.csv
@@ -61,7 +61,7 @@ jobs:
           SF_LAZY_LOAD_MODULES: 'true'
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
-
+ 
       - name: Encode CSV file to Base64
         if: success()
         id: encode_file
@@ -72,7 +72,7 @@ jobs:
             echo "Scanner report CSV file not found."
             exit 1
           fi
-
+ 
       - name: Check Scanner Report Severity
         id: check_severity
         run: |
@@ -100,15 +100,22 @@ jobs:
               echo "QUALITY_GATE_STATUS=PASSED" >> $GITHUB_ENV
               echo "::notice::Quality gate passed."
             fi
-
-      # Upload the scanner report even if quality gate fails
-      - name: Upload Scanner Report as Artifact
-        if: always()  # Ensure file is uploaded regardless of pass/fail
-        uses: actions/upload-artifact@v3
-        with:
-          name: scanner-report
-          path: scanner-report.csv
-
+ 
+      - name: Revert changes if quality gate fails and push the reset commit
+        if: failure()  # If the quality gate failed
+        env:
+          PAT_TOKEN: ${{ secrets.PAT_TOKEN }}  # Use the PAT token instead of GITHUB_TOKEN
+        run: |
+          git reset --hard HEAD~1  # Reset the branch to remove the failed commit
+          git push --force "https://x-access-token:${PAT_TOKEN}@github.com/${{ github.repository }}".git Dev3Mnr  # Force push to Dev3Mnr branch
+ 
+      - name: Debug Git Status and Logs (optional)
+        if: failure()
+        run: |
+          git status
+          git log -1
+          git remote -v
+ 
       - name: Get Repository and Branch Info
         id: get-info
         run: |
@@ -117,7 +124,13 @@ jobs:
           COMMIT_LABEL=$(git log -1 --pretty=format:'%s')
           FILE_TITLE="Code Scanner Delta Report_${REPO_NAME}_${BRANCH_NAME}_${COMMIT_LABEL}"
           echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
-
+ 
+      - name: Upload Scanner Report as Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.FILE_TITLE }}
+          path: scanner-report.csv
+ 
       - name: Get Pusher's Email
         id: get-pusher-email
         run: |
@@ -126,7 +139,7 @@ jobs:
           PUSHER_EMAIL=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
             "https://api.github.com/repos/${REPO}/commits/${COMMIT_SHA}" | jq -r '.commit.committer.email')
           echo "PUSHER_EMAIL=${PUSHER_EMAIL}" >> $GITHUB_ENV
-
+ 
       - name: Upload CSV Report to Salesforce
         if: success() && env.QUALITY_GATE_STATUS == 'PASSED'  # Only upload if quality gate passed
         run: |
@@ -164,3 +177,4 @@ jobs:
         env:
           SF_ACCESS_TOKEN: ${{ secrets.SF_ACCESS_TOKEN }}
         shell: bash
+        
