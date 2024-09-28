@@ -45,7 +45,7 @@ public with sharing class AccountInsertClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
-                System.debug('welcome to weekend Work');
+                System.debug('welcome to weekend Work Cancel');
             }
         } else {
             throw new CustomException('You do not have permission to create Opportunity records.');
