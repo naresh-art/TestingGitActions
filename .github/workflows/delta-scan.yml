@@ -8,8 +8,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  actions: write
-  checks: write
 
 jobs:
   installcli:
@@ -54,6 +52,7 @@ jobs:
           files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
           if [ -n "$files" ]; then
+            # Scan multiple files by passing them as space-separated values
             sf scanner:run --target $(echo "$files") --format "csv" --outfile "scanner-report.csv" || { echo "Scanner run failed"; exit 1; }
           else
             echo "No relevant files changed."
@@ -84,18 +83,19 @@ jobs:
               echo "::error file=scanner-report.csv::Scanner report not found!"
               exit 1
             fi
-
+       
             echo "Checking scanner report content:"
-            cat scanner-report.csv
-
+            cat scanner-report.csv  # Print CSV content to see what's inside
+           
             SEVERITY_FAIL_COUNT=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner-report.csv)
             SEVERITY_FAIL_COUNT=${SEVERITY_FAIL_COUNT:-0}  # Default to 0 if SEVERITY_FAIL_COUNT is empty
             echo "Severity 3 Count: $SEVERITY_FAIL_COUNT"
-
+       
             if [ "$SEVERITY_FAIL_COUNT" -gt 0 ]; then
               echo "Quality gate failed due to high severity issues."
               echo "QUALITY_GATE_STATUS=FAILED" >> $GITHUB_ENV
               echo "::error::Quality gate failed due to high severity issues."
+              exit 1  # Fail the workflow and block the commit
             else
               echo "Quality gate passed."
               echo "QUALITY_GATE_STATUS=PASSED" >> $GITHUB_ENV
@@ -110,71 +110,60 @@ jobs:
           name: scanner-report
           path: scanner-report.csv
 
-  # Approval Job for Lead Contributor (naresh-art)
-  approval:
-    needs: installcli  # Approval happens after quality gate check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Request Approval from Lead (naresh-art)
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const response = await github.pulls.requestReviewers({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
-              reviewers: ['Prasanthkys']
-            });
-            core.setOutput("review_requests", JSON.stringify(response));
-
-      - name: Await Approval Decision
-        id: approval_status
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const { data: reviews } = await github.pulls.listReviews({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
-            });
-
-            const approval = reviews.find(review => review.state === 'APPROVED');
-            const rejection = reviews.find(review => review.state === 'CHANGES_REQUESTED');
-
-            if (approval) {
-              core.setOutput('APPROVAL_STATUS', 'APPROVED');
-            } else if (rejection) {
-              core.setOutput('APPROVAL_STATUS', 'REJECTED');
-            } else {
-              throw new Error('No approval or rejection decision was found.');
-            }
-
-  # Deployment Job (if approval is granted)
-  deploy:
-    needs: [approval]
-    runs-on: ubuntu-latest
-    if: needs.approval.outputs.APPROVAL_STATUS == 'APPROVED'
-    steps:
-      - name: Deploy to Salesforce
+      - name: Get Repository and Branch Info
+        id: get-info
         run: |
-          echo "Deploying the changes to Salesforce..."
-          sf deploy metadata --target-org ${{ secrets.SALESFORCE_ORG_ALIAS }} --source-dir "force-app"
+          REPO_NAME=$(echo $GITHUB_REPOSITORY | cut -d'/' -f2)
+          BRANCH_NAME=$(echo $GITHUB_REF | sed 's/refs\/heads\///')
+          COMMIT_LABEL=$(git log -1 --pretty=format:'%s')
+          FILE_TITLE="Code Scanner Delta Report_${REPO_NAME}_${BRANCH_NAME}_${COMMIT_LABEL}"
+          echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
 
-      - name: Commit Changes to Repo
+      - name: Get Pusher's Email
+        id: get-pusher-email
         run: |
-          echo "Committing approved changes to the repository..."
-          git config --global user.email "${{ steps.get-pusher-email.outputs.PUSHER_EMAIL }}"
-          git config --global user.name "GitHub Action"
-          git commit -m "Approved commit by lead contributor naresh-art"
-          git push
+          COMMIT_SHA=${{ github.sha }}
+          REPO=${{ github.repository }}
+          PUSHER_EMAIL=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+            "https://api.github.com/repos/${REPO}/commits/${COMMIT_SHA}" | jq -r '.commit.committer.email')
+          echo "PUSHER_EMAIL=${PUSHER_EMAIL}" >> $GITHUB_ENV
 
-  # Block Commit Job (if rejection is given)
-  block_commit:
-    needs: [approval]
-    runs-on: ubuntu-latest
-    if: needs.approval.outputs.APPROVAL_STATUS == 'REJECTED'
-    steps:
-      - name: Block Commit
+      - name: Upload CSV Report to Salesforce
+        if: success() && env.QUALITY_GATE_STATUS == 'PASSED'  # Only upload if quality gate passed
         run: |
-          echo "The changes were rejected by naresh-art. Blocking commit."
-          exit 1  # Fail the workflow if rejected
+          if [ -s encoded_report.txt ]; then
+            contentDocumentResponse=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/ContentVersion/ \
+              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "Title": "'"${{ env.FILE_TITLE }}"'",
+                "PathOnClient": "scanner-report.csv",
+                "VersionData": "'"$(cat encoded_report.txt)"'"
+              }')
+            echo "Response: $contentDocumentResponse"
+           
+            contentVersionId=$(echo $contentDocumentResponse | jq -r '.id // empty')
+            if [ -z "$contentVersionId" ]; then
+              echo "Error: Failed to upload file. No ContentVersionId found."
+              exit 1
+            fi
+            echo "ContentVersionId: $contentVersionId"
+           
+            contentDocumentResponse=$(curl -X GET https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/ContentVersion/$contentVersionId \
+              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}")
+            echo "ContentDocument Response: $contentDocumentResponse"
+           
+            contentDocumentId=$(echo $contentDocumentResponse | jq -r '.ContentDocumentId // empty')
+            if [ -z "$contentDocumentId" ]; then
+              echo "Error: Failed to retrieve ContentDocumentId. No ContentDocumentId found."
+              exit 1
+            fi
+            echo "ContentDocumentId: $contentDocumentId"
+          else
+            echo "No scanner report generated, skipping upload."
+          fi
+        env:
+          SF_ACCESS_TOKEN: ${{ secrets.SF_ACCESS_TOKEN }}
+        shell: bash
+
+        
