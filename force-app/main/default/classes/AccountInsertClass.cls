@@ -66,7 +66,6 @@ public with sharing class AccountInsertClass {
                 }
             }
             insert accList;
-            System.debug('welcome Saturday Bugs Bunny Test Data');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
