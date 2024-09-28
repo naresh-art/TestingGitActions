@@ -64,7 +64,7 @@ public with sharing class DummyAccountClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
-                System.debug('Welcome Naresh Saturday Bugs Bunny Test data 12345');
+                System.debug('Welcome Naresh Saturday Bugs Bunny Test data New');
             }
         } else {
             throw new CustomException('You do not have permission to create Opportunity records.');
