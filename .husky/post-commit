@@ -20,11 +20,10 @@ if [ $? -eq 0 ]; then
   echo "Successfully pushed changes to $temp_branch" >> .husky/post-commit.log
 
   # Automatically create a pull request using GitHub CLI (gh)
-  # Replace 'collaborator-username' with the actual GitHub username of the reviewer
   gh pr create --base "$current_branch" --head "$temp_branch" --title "Auto PR from $temp_branch to $current_branch" --body "This is an automatically generated pull request."
 
   if [ $? -eq 0 ]; then
-    echo "Successfully created pull request from $temp_branch to $current_branch and assigned reviewer." >> .husky/post-commit.log
+    echo "Successfully created pull request from $temp_branch to $current_branch" >> .husky/post-commit.log
   else
     echo "Failed to create pull request from $temp_branch to $current_branch" >> .husky/post-commit.log
   fi
