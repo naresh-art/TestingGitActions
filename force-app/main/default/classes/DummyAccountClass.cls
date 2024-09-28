@@ -64,7 +64,7 @@ public with sharing class DummyAccountClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
-                System.debug('Welcome to Githubs toooooooo:');
+                System.debug('Welcome to Githubs to much:');
             }
         } else {
             throw new CustomException('You do not have permission to create Opportunity records.');
