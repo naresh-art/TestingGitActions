@@ -1,5 +1,4 @@
 #!/bin/bash
-$env:GITHUB_TOKEN="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"
 
 # Get the current branch name
 current_branch=$(git rev-parse --abbrev-ref HEAD)
@@ -20,25 +19,8 @@ git push origin "$temp_branch"
 if [ $? -eq 0 ]; then
   echo "Successfully pushed changes to $temp_branch" >> .husky/post-commit.log
 
-  # Fetch collaborators from GitHub API
-  raw_response=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-    "https://api.github.com/repos/naresh-art/TestingGitActions/collaborators")
-
-  # Check if there's an error in the response
-  if echo "$raw_response" | jq -e 'has("message")' > /dev/null; then
-    error_message=$(echo "$raw_response" | jq -r '.message')
-    echo "Error: $error_message" >> .husky/post-commit.log
-    exit 1
-  fi
-
-  # Extract collaborator logins
-  collaborators=$(echo "$raw_response" | jq -r '.[] | .login' | paste -sd "," -)
-
-  # Log the list of collaborators
-  echo "Collaborators: $collaborators" >> .husky/post-commit.log
-
   # Automatically create a pull request using GitHub CLI (gh) with dynamic reviewers
-  gh pr create --base "$current_branch" --head "$temp_branch" --title "Auto PR from $temp_branch to $current_branch" --body "This is an automatically generated pull request." --reviewer "$collaborators"
+  gh pr create --base "$current_branch" --head "$temp_branch" --title "Auto PR from $temp_branch to $current_branch" --body "This is an automatically generated pull request." --reviewer "Prasanthkys"
 
   if [ $? -eq 0 ]; then
     echo "Successfully created pull request from $temp_branch to $current_branch and assigned reviewers: $collaborators" >> .husky/post-commit.log
