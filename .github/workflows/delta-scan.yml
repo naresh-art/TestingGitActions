@@ -96,7 +96,7 @@ jobs:
         run: |
           CRITICAL_PERMISSIONS=(
             "Manage All Data"
-            "View All Data"
+            "ViewAllData"
             "Customize Application"
             "Manage Encryption Keys"
             "Reset User Passwords and Unlock Users"
