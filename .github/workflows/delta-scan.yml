@@ -117,7 +117,7 @@ jobs:
           # Search through profile files and check permissions
           find force-app/main/default/profiles -type f -name '*.profile-meta.xml' | while IFS= read -r FILE; do
               PROFILE_NAME=$(grep -oP '(?<=<fullName>).*?(?=</fullName>)' "$FILE")
-              echo "Profile Name $PROFILE_NAME"
+              echo $PROFILE_NAME
               for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
                   if grep -q "<enabled>true</enabled>.*<name>$PERMISSION</name>" "$FILE"; then
                       if ! grep -q "System Administrator" "$FILE"; then
