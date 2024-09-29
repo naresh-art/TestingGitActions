@@ -4,7 +4,7 @@ on:
   pull_request_review:
     types: [submitted]
   check_suite:
-    types: [completed] # Triggered when a check suite (multiple check runs) completes
+    types: [completed]
 
 jobs:
   pr_approval:
@@ -33,12 +33,13 @@ jobs:
           echo "Check runs: $CHECK_RUNS"
           echo "$CHECK_RUNS" > check_runs.json
 
-      - name: Process check run data
+      - name: Process completed check run data
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
         id: process_checks
         run: |
-          CHECK_NAMES=$(jq -r '.check_runs[] | .name' check_runs.json | paste -sd "," -)
-          CHECK_STATUSES=$(jq -r '.check_runs[] | .conclusion' check_runs.json | paste -sd "," -)
+          # Filter only completed checks
+          CHECK_NAMES=$(jq -r '.check_runs[] | select(.status == "completed") | .name' check_runs.json | paste -sd "," -)
+          CHECK_STATUSES=$(jq -r '.check_runs[] | select(.status == "completed") | .conclusion' check_runs.json | paste -sd "," -)
           
           echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
           echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
