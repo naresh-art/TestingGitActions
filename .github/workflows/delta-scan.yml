@@ -85,14 +85,17 @@ jobs:
           files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
           if [ -n "$files" ]; then
+            # Create header for the final report file
+            echo "file,severity,ruleName" > scanner-report.csv
             for file in $files; do
               echo "Running scanner on $file"
-              sf scanner:run --target "$file" --format csv --outfile scanner-report.csv --category "Performance" || { echo "Scanner run failed on $file"; exit 1; }
+              sf scanner:run --target "$file" --format csv --outfile temp-scanner-report.csv --category "Performance" || { echo "Scanner run failed on $file"; exit 1; }
+              # Append results of each scan to the combined report
+              tail -n +2 temp-scanner-report.csv >> scanner-report.csv
             done
           else
             echo "No relevant files changed."
             # Create an empty CSV file to avoid errors in the next step
-            echo "Creating an empty scanner-report.csv"
             echo "file,severity,ruleName" > scanner-report.csv
           fi
           ls -l scanner-report.csv  # Log to verify that the file is created
@@ -101,11 +104,11 @@ jobs:
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
 
-      - name: Upload scanner-report.csv as artifact
+      - name: Upload combined scanner report as artifact
         uses: actions/upload-artifact@v3
         with:
           name: scanner-report.csv
-          path: scanner-report.csv
+          path: scanner-report.csv        
 
   run-salesforce-critical-permissions-check:
     needs: calculate-differences
