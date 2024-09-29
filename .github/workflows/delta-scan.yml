@@ -114,17 +114,20 @@ jobs:
  
           BLOCKED_FILES=()
  
-          # Search through profiles
-            find force-app/main/default/profiles -type f -name '*.profile-meta.xml' | while read -r FILE; do
-                for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
-                    if grep -q "$PERMISSION" "$FILE"; then
-                        if ! grep -q "System Administrator" "$FILE"; then
-                            # If permission is found and the profile is not System Administrator, block the file
-                            BLOCKED_FILES+=("$FILE")
-                        fi
-                    fi
-                done
-            done
+          # Search through profile files and check permissions
+          find force-app/main/default/profiles -type f -name '*.profile-meta.xml' | while IFS= read -r FILE; do
+              PROFILE_NAME=$(grep -oP '(?<=<fullName>).*?(?=</fullName>)' "$FILE")
+              echo "Profile Name $PROFILE_NAME"
+              for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
+                  if grep -q "<enabled>true</enabled>.*<name>$PERMISSION</name>" "$FILE"; then
+                      if ! grep -q "System Administrator" "$FILE"; then
+                          # If critical permission is found and it's not System Administrator, block the profile
+                          BLOCKED_PROFILES+=("$PROFILE_NAME ($FILE)")
+                          break  # Exit the loop after finding the first blocked permission
+                      fi
+                  fi
+              done
+          done
  
           # Search through permission sets
           for FILE in $(find force-app/main/default/permissionsets -name '*.permissionset-meta.xml'); do
