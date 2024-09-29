@@ -39,7 +39,7 @@ public with sharing class DummyAccountClass {
                 }
             }
             insert accList;
-            System.debug('Test 1 seviorityyy test');
+            System.debug('Test 1 seviorityyy testss');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
