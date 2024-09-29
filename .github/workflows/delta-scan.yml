@@ -72,7 +72,7 @@ jobs:
               echo "Blocking your pull request due to severity 3 vulnerabilities found."
               exit 1
             else
-              echo "No severity 3 vulnerabilities found. Proceeding."
+              echo "No severity 3 vulnerabilities found. Proceeding with Aprroval."
             fi
           else
             echo "No scanner report found."
