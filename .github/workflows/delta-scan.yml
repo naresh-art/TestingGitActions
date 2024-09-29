@@ -84,7 +84,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: SFDX_Code_Scan_Report
-          path: scanner-report.csv
+          path: ./scanner-report.csv
 
   check-critical-permissions:
     runs-on: ubuntu-latest

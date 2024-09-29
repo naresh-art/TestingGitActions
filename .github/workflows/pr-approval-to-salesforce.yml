@@ -1,4 +1,4 @@
-name: PR Approval Workflow
+name: PR Approval to Salesforce Workflow
 
 on:
   pull_request_review:
@@ -33,18 +33,7 @@ jobs:
           echo "Check runs: $CHECK_RUNS"
           echo "$CHECK_RUNS" > check_runs.json
 
-      - name: Process completed check run data
-        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
-        id: process_checks
-        run: |
-          # Filter only completed checks
-          CHECK_NAMES=$(jq -r '.check_runs[] | select(.status == "completed") | .name' check_runs.json | paste -sd "," -)
-          CHECK_STATUSES=$(jq -r '.check_runs[] | select(.status == "completed") | .conclusion' check_runs.json | paste -sd "," -)
-          
-          echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
-          echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
-
-      - name: Download SFDX Code Scan Report
+      - name: Download SFDX Code Scan Report from Delta Scan Workflow
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
         uses: actions/download-artifact@v3
         with:
