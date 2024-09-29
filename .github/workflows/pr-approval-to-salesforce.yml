@@ -44,19 +44,21 @@ jobs:
           echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
           echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
 
-      - name: Download artifact
+      - name: Download SFDX Code Scan Report
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
         uses: actions/download-artifact@v3
         with:
-          name: pr-artifact
+          name: SFDX_Code_Scan_Report
 
-      - name: Attach PR Artifact to Salesforce PR_Request__c
+      - name: Attach Code Scan Report to Salesforce PR_Request__c
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
         run: |
-          # Encode the artifact in base64 for the file upload
-          FILE_PATH="./path/to/downloaded/artifact"
+          # Define file path for the downloaded artifact
+          FILE_PATH="./SFDX_Code_Scan_Report/scanner-report.csv"
+          
+          # Encode the artifact in base64 for file upload
           BASE64_CONTENT=$(base64 "$FILE_PATH")
-          FILENAME="artifact.zip"
+          FILENAME="scanner-report.csv"
 
           # Create the PR Request in Salesforce
           prStatus=${{ steps.pr_approval_check.outputs.PR_STATUS }}
@@ -87,7 +89,7 @@ jobs:
               "ParentId": "'"$PR_REQUEST_ID"'",
               "Name": "'"$FILENAME"'",
               "Body": "'"$BASE64_CONTENT"'",
-              "ContentType": "application/zip"
+              "ContentType": "text/csv"
             }')
 
           echo "Attachment response: $attachmentResponse"
