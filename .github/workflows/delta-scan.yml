@@ -202,9 +202,9 @@ jobs:
             echo "Blocking your pull request due to critical permission issues."
             exit 1
           fi
-          echo "No issues found. Proceeding with commit and push."
+          echo "No issues found. Send Approval to Reviewers."
  
-  commit-and-push:
+  code-analyzer-report:
     needs: [block-pr-if-vulnerabilities-found]
     if: success()  # Ensures this job only runs if the previous jobs were successful
     runs-on: ubuntu-latest
