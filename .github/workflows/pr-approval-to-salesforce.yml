@@ -4,7 +4,7 @@ on:
   pull_request_review:
     types: [submitted]
   check_suite:
-    types: [completed]
+    types: [completed]  # Trigger when the entire check suite (all check runs) completes
 
 jobs:
   pr_approval:
@@ -22,7 +22,7 @@ jobs:
             exit 1
           fi
 
-      - name: Fetch all check runs for the PR
+      - name: Wait for all checks to complete
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
         id: fetch_checks
         run: |
@@ -33,16 +33,17 @@ jobs:
           echo "Check runs: $CHECK_RUNS"
           echo "$CHECK_RUNS" > check_runs.json
 
-      - name: Process completed check run data
+      - name: Process all check run data
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
         id: process_checks
         run: |
-          # Filter only completed checks
-          CHECK_NAMES=$(jq -r '.check_runs[] | select(.status == "completed") | .name' check_runs.json | paste -sd "," -)
-          CHECK_STATUSES=$(jq -r '.check_runs[] | select(.status == "completed") | .conclusion' check_runs.json | paste -sd "," -)
+          # Extract all check run names and statuses (completed or not)
+          CHECK_NAMES=$(jq -r '.check_runs[] | .name' check_runs.json | paste -sd "," -)
+          CHECK_STATUSES=$(jq -r '.check_runs[] | .conclusion' check_runs.json | paste -sd "," -)
+          CHECK_STATUSES_WITH_NULLS=$(jq -r '.check_runs[] | if .conclusion == null then "in_progress" else .conclusion end' check_runs.json | paste -sd "," -)
           
           echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
-          echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
+          echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES_WITH_NULLS"
 
       - name: Send PR Information to Salesforce
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
