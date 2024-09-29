@@ -211,16 +211,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
  
-      - name: Commit and Push Changes
-        run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
-          git add .
-          git commit -m "Code changes after vulnerability scan"
-          git push origin HEAD:${{ github.head_ref }}
- 
-      - name: Upload Scanner Report
-        uses: actions/upload-artifact@v3
+      - name: Download scanner-report.csv artifact
+        uses: actions/download-artifact@v3
         with:
-          name: SFDX_Code_Scan_Report
-          path: scanner-report.csv
+          name: scanner-report.csv
