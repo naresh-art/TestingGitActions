@@ -11,54 +11,38 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check if PR is approved or rejected
+      - name: Check if PR is approved
         id: pr_approval_check
         run: |
           if [[ "${{ github.event.review.state }}" == "approved" ]]; then
             echo "PR Approved"
             echo "::set-output name=PR_STATUS::approved"
-            echo "::set-output name=REVIEW_COMMENT::'${{ github.event.review.body }}'"
           elif [[ "${{ github.event.review.state }}" == "changes_requested" ]]; then
-            echo "PR Rejected"
+            echo "PR Changes Requested"
             echo "::set-output name=PR_STATUS::rejected"
-            echo "::set-output name=REVIEW_COMMENT::'${{ github.event.review.body }}'"
           else
-            echo "PR Review Submitted, but neither approved nor rejected."
+            echo "PR Not Approved"
             exit 1
           fi
 
-      - name: Wait for all check runs to complete
+      - name: Fetch all check runs for the PR
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved' || steps.pr_approval_check.outputs.PR_STATUS == 'rejected'
-        id: wait_for_checks
+        id: fetch_checks
         run: |
-          # Poll for all check runs until they are completed
-          completed=false
-          while [ "$completed" = false ]; do
-            CHECK_RUNS=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs)
+          CHECK_RUNS=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs)
 
-            # Check if all check runs are completed
-            IN_PROGRESS=$(echo "$CHECK_RUNS" | jq '[.check_runs[] | select(.status != "completed")] | length')
-
-            if [ "$IN_PROGRESS" -eq 0 ]; then
-              echo "All check runs are completed."
-              completed=true
-            else
-              echo "Some check runs are still in progress. Waiting for completion..."
-              sleep 30  # Wait for 30 seconds before checking again
-            fi
-          done
-
+          echo "Check runs: $CHECK_RUNS"
           echo "$CHECK_RUNS" > check_runs.json
 
       - name: Process completed check run data
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved' || steps.pr_approval_check.outputs.PR_STATUS == 'rejected'
         id: process_checks
         run: |
-          # Extract all check run names and statuses (completed)
-          CHECK_NAMES=$(jq -r '.check_runs[] | .name' check_runs.json | paste -sd "," -)
-          CHECK_STATUSES=$(jq -r '.check_runs[] | .conclusion' check_runs.json | paste -sd "," -)
+          # Filter only completed checks
+          CHECK_NAMES=$(jq -r '.check_runs[] | select(.status == "completed") | .name' check_runs.json | paste -sd "," -)
+          CHECK_STATUSES=$(jq -r '.check_runs[] | select(.status == "completed") | .conclusion' check_runs.json | paste -sd "," -)
           
           echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
           echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
@@ -66,17 +50,20 @@ jobs:
       - name: Send PR Information to Salesforce
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved' || steps.pr_approval_check.outputs.PR_STATUS == 'rejected'
         run: |
+          prStatus=${{ steps.pr_approval_check.outputs.PR_STATUS }}
+          prComment="${{ github.event.review.body }}"
+          
           plRequestObjectResponse=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/ \
             -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json" \
             -d '{
                 "PR_Title__c": "'"${{ github.event.pull_request.title }}"'",
                 "PR_Link__c": "'"${{ github.event.pull_request.html_url }}"'",
-                "PR_Status__c": "'"${{ steps.pr_approval_check.outputs.PR_STATUS }}"'",
+                "PR_Status__c": "'"$prStatus"'",
+                "PR_Review_Comment__c": "'"$prComment"'",
                 "PR_Author__c": "'"${{ github.event.pull_request.user.login }}"'",
                 "PR_Reviewer__c": "'"${{ github.event.review.user.login }}"'",
                 "PR_Check_Status__c": "'"${{ steps.process_checks.outputs.CHECK_STATUSES }}"'",
-                "PR_Check_Name__c": "'"${{ steps.process_checks.outputs.CHECK_NAMES }}"'",
-                "PR_Review_Comment__c": "'"${{ steps.pr_approval_check.outputs.REVIEW_COMMENT }}"'"
+                "PR_Check_Name__c": "'"${{ steps.process_checks.outputs.CHECK_NAMES }}"'"
             }')
           echo "Response: $plRequestObjectResponse"
