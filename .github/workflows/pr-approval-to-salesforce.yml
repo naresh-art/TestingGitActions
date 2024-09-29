@@ -4,7 +4,7 @@ on:
   pull_request_review:
     types: [submitted]
   check_suite:
-    types: [completed]  # This ensures that all checks have completed before the workflow runs
+    types: [completed]
 
 jobs:
   pr_approval:
@@ -22,24 +22,38 @@ jobs:
             exit 1
           fi
 
-      - name: Fetch all check runs for the PR (after all checks are completed)
+      - name: Wait for all check runs to complete
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
-        id: fetch_checks
+        id: wait_for_checks
         run: |
-          CHECK_RUNS=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-          -H "Accept: application/vnd.github.v3+json" \
-          https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.check_suite.head_sha }}/check-runs)
+          # Poll for all check runs until they are completed
+          completed=false
+          while [ "$completed" = false ]; do
+            CHECK_RUNS=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs)
 
-          echo "Check runs: $CHECK_RUNS"
+            # Check if all check runs are completed
+            IN_PROGRESS=$(echo "$CHECK_RUNS" | jq '[.check_runs[] | select(.status != "completed")] | length')
+
+            if [ "$IN_PROGRESS" -eq 0 ]; then
+              echo "All check runs are completed."
+              completed=true
+            else
+              echo "Some check runs are still in progress. Waiting for completion..."
+              sleep 30  # Wait for 30 seconds before checking again
+            fi
+          done
+
           echo "$CHECK_RUNS" > check_runs.json
 
       - name: Process completed check run data
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
         id: process_checks
         run: |
-          # Extract only completed check run names and statuses
-          CHECK_NAMES=$(jq -r '.check_runs[] | select(.status == "completed") | .name' check_runs.json | paste -sd "," -)
-          CHECK_STATUSES=$(jq -r '.check_runs[] | select(.status == "completed") | .conclusion' check_runs.json | paste -sd "," -)
+          # Extract all check run names and statuses (completed)
+          CHECK_NAMES=$(jq -r '.check_runs[] | .name' check_runs.json | paste -sd "," -)
+          CHECK_STATUSES=$(jq -r '.check_runs[] | .conclusion' check_runs.json | paste -sd "," -)
           
           echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
           echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
