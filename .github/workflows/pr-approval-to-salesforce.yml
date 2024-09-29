@@ -1,0 +1,35 @@
+name: PR Approval Workflow
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  pr_approval:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check if PR is approved
+        id: pr_approval_check
+        run: |
+          if [[ "${{ github.event.review.state }}" == "approved" ]]; then
+            echo "PR Approved"
+            echo "::set-output name=PR_STATUS::approved"
+          else
+            echo "PR Not Approved"
+            exit 1
+          fi
+
+      - name: Send PR Information to Salesforce
+        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
+        run: |
+          curl --location --request POST 'curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/ \
+          --header 'Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}' \
+          --header 'Content-Type: application/json' \
+          --data-raw '{
+              "PR_Title__c": "${{ github.event.pull_request.title }}",
+              "PR_Link__c": "${{ github.event.pull_request.html_url }}",
+              "PR_Status__c": "Approved",
+              "PR_Author__c": "${{ github.event.pull_request.user.login }}",
+              "PR_Reviewer__c": "${{ github.event.review.user.login }}"
+          }'
