@@ -74,6 +74,7 @@ jobs:
             echo "Creating an empty scanner-report.csv"
             echo "file,severity,ruleName" > scanner-report.csv
           fi
+          ls -l scanner-report.csv  # Log to verify that the file is created
         env:
           SF_LAZY_LOAD_MODULES: 'true'
           SF_AUTOUPDATE_DISABLE: 'true'
