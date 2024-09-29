@@ -49,7 +49,7 @@ jobs:
             echo "No previous commit to compare to." > changed_files.txt
           fi
           cat changed_files.txt
-          
+
   run-salesforce-code-analyzer:
     needs: calculate-differences
     runs-on: ubuntu-latest
@@ -153,9 +153,7 @@ jobs:
             echo "No scanner report found."
             exit 1
           fi
-    outputs:
-      severity_fail_count: ${{ steps.check-severity.outputs.severity_fail_count }}
- 
+          
   block-pr-if-vulnerabilities-found:
     needs: [check-severity-3-vulnerabilities, run-salesforce-critical-permissions-check]
     runs-on: ubuntu-latest
