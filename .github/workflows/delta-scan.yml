@@ -1,10 +1,10 @@
 name: Salesforce Code Scan and Critical Permissions Check on Pull Request
- 
+
 on:
   pull_request:
     branches:
       - '**'
- 
+
 jobs:
   setup-installation:
     runs-on: ubuntu-latest
@@ -12,24 +12,24 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
- 
+
       - name: Use Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 20.x
- 
+
       - name: Install Salesforce CLI
         run: npm install @salesforce/cli --global
- 
+
       - name: Install Scanner Plugin
         run: sf plugins install @salesforce/sfdx-scanner
- 
+
       - name: Verify Salesforce CLI Installation
         run: sf --version
- 
+
       - name: Verify Scanner Plugin Installation
         run: sf plugins --core
- 
+
   calculate-differences:
     needs: setup-installation
     runs-on: ubuntu-latest
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
- 
+
       - name: Get changed files
         id: get-changes
         run: |
@@ -55,7 +55,7 @@ jobs:
         with:
           name: changed_files.txt
           path: changed_files.txt
-          
+
   run-salesforce-code-analyzer:
     needs: calculate-differences
     runs-on: ubuntu-latest
@@ -112,7 +112,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
- 
+
       - name: Scan Profiles and Permission Sets for Critical Permissions
         run: |
           CRITICAL_PERMISSIONS=(
@@ -134,9 +134,9 @@ jobs:
               "ResetPasswordsUnlockUsers"
               "ViewAllData"
           )
- 
+
           BLOCKED_FILES=()
- 
+
           # Search through profiles
           for FILE in $(find force-app/main/default/profiles -name '*.profile-meta.xml'); do
             for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
@@ -145,7 +145,7 @@ jobs:
               fi
             done
           done
- 
+
           # Search through permission sets
           for FILE in $(find force-app/main/default/permissionsets -name '*.permissionset-meta.xml'); do
             for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
@@ -154,7 +154,7 @@ jobs:
               fi
             done
           done
- 
+
           if [ ${#BLOCKED_FILES[@]} -gt 0 ]; then
             echo "Critical permissions found in the following files:"
             for FILE in "${BLOCKED_FILES[@]}"; do
@@ -164,13 +164,15 @@ jobs:
           else
             echo "No critical permissions assigned to non-System Administrator profiles or permission sets."
           fi
- 
+
   check-severity-3-vulnerabilities:
     needs: run-salesforce-code-analyzer
     runs-on: ubuntu-latest
+    outputs:
+      severity_fail_count: ${{ steps.check-severity.outputs.severity_fail_count }}
     steps:
       - uses: actions/checkout@v3
- 
+
       - name: Download scanner-report.csv artifact
         uses: actions/download-artifact@v3
         with:
@@ -183,17 +185,19 @@ jobs:
             severity_fail_count=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner-report.csv)
             echo "Severity 3 issues count: $severity_fail_count"
             echo "severity_fail_count=$severity_fail_count" >> $GITHUB_ENV
+            echo "::set-output name=severity_fail_count::$severity_fail_count"
           else
             echo "No scanner report found."
             exit 1
           fi
- 
+
   block-pr-if-vulnerabilities-found:
     needs: [check-severity-3-vulnerabilities, run-salesforce-critical-permissions-check]
     runs-on: ubuntu-latest
     steps:
       - name: Block PR if Vulnerabilities or Critical Permission Issues Found
         run: |
+          severity_fail_count="${{ needs.check-severity-3-vulnerabilities.outputs.severity_fail_count }}"
           if [ "$severity_fail_count" -gt 0 ]; then
             echo "Blocking your pull request due to severity 3 vulnerabilities found."
             exit 1
@@ -204,14 +208,13 @@ jobs:
           fi
           echo "No issues found. Send Approval to Reviewers."
 
- 
   code-analyzer-report:
     needs: [block-pr-if-vulnerabilities-found]
     if: success()  # Ensures this job only runs if the previous jobs were successful
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
- 
+
       - name: Download scanner-report.csv artifact
         uses: actions/download-artifact@v3
         with:
