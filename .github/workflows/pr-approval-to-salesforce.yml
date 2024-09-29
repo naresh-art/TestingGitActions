@@ -47,8 +47,14 @@ jobs:
           curl -L -o my-artifact.zip -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
           https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip
 
+      - name: Verify downloaded file (Debugging)
+        run: |
+          file my-artifact.zip  # Check if it's recognized as a ZIP file
+          ls -lh my-artifact.zip  # Show the file size for verification
+
       - name: Extract Artifact
-        run: unzip my-artifact.zip  
+        run: |
+          unzip my-artifact.zip  
 
       - name: Attach Code Scan Report to Salesforce PR_Request__c
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
