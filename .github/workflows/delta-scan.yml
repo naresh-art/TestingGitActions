@@ -49,9 +49,7 @@ jobs:
             echo "No previous commit to compare to." > changed_files.txt
           fi
           cat changed_files.txt
-    outputs:
-      changed_files: ${{ steps.get-changes.outputs.changed_files }}
- 
+          
   run-salesforce-code-analyzer:
     needs: calculate-differences
     runs-on: ubuntu-latest
