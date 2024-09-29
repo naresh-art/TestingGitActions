@@ -126,7 +126,7 @@ jobs:
           # Search through permission sets
           for FILE in $(find force-app/main/default/permissionsets -name '*.permissionset-meta.xml'); do
             for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
-              if grep -q "$PERMISSION" "$FILE" && ! grep -q "System Administrator" "$FILE"; then
+              if grep -q "$PERMISSION" "$FILE" then
                 BLOCKED_FILES+=("$FILE")
               fi
             done
