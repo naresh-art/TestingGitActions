@@ -194,7 +194,7 @@ jobs:
     steps:
       - name: Block PR if Vulnerabilities or Critical Permission Issues Found
         run: |
-          if [ "${{ needs.check-severity-3-vulnerabilities.outputs.severity_fail_count }}" -gt 0 ]; then
+          if [ "$severity_fail_count" -gt 0 ]; then
             echo "Blocking your pull request due to severity 3 vulnerabilities found."
             exit 1
           fi
@@ -203,6 +203,7 @@ jobs:
             exit 1
           fi
           echo "No issues found. Send Approval to Reviewers."
+
  
   code-analyzer-report:
     needs: [block-pr-if-vulnerabilities-found]
