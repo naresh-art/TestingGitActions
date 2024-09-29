@@ -83,8 +83,8 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v3
         with:
-          name: SFDX_Code_Scan_Report
-          path: scanner-report.csv
+          name: pr-artifact
+          path: ./path/to/artifact/file
 
   check-critical-permissions:
     runs-on: ubuntu-latest

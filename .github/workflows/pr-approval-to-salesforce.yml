@@ -44,9 +44,21 @@ jobs:
           echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
           echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
 
-      - name: Send PR Information to Salesforce
+      - name: Download artifact
+        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
+        uses: actions/download-artifact@v3
+        with:
+          name: pr-artifact
+
+      - name: Attach PR Artifact to Salesforce PR_Request__c
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
         run: |
+          # Encode the artifact in base64 for the file upload
+          FILE_PATH="./path/to/downloaded/artifact"
+          BASE64_CONTENT=$(base64 "$FILE_PATH")
+          FILENAME="artifact.zip"
+
+          # Create the PR Request in Salesforce
           prStatus=${{ steps.pr_approval_check.outputs.PR_STATUS }}
           prComment="${{ github.event.review.body }}"
           
@@ -63,4 +75,19 @@ jobs:
                 "PR_Check_Status__c": "'"${{ steps.process_checks.outputs.CHECK_STATUSES }}"'",
                 "PR_Check_Name__c": "'"${{ steps.process_checks.outputs.CHECK_NAMES }}"'"
             }')
+
           echo "Response: $plRequestObjectResponse"
+          PR_REQUEST_ID=$(echo "$plRequestObjectResponse" | jq -r '.id')
+
+          # Attach the file to the PR_Request__c record in Salesforce
+          attachmentResponse=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Attachment/ \
+            -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "ParentId": "'"$PR_REQUEST_ID"'",
+              "Name": "'"$FILENAME"'",
+              "Body": "'"$BASE64_CONTENT"'",
+              "ContentType": "application/zip"
+            }')
+
+          echo "Attachment response: $attachmentResponse"
