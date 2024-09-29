@@ -35,12 +35,17 @@ jobs:
 
       - name: Get Artifact ID using REST API
         run: |
-            ARTIFACT_ID=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \"https://api.github.com/repos/${{github.repository }}/actions/artifacts" | jq '.artifacts[0].id')
-            echo "Artifact ID: $ARTIFACT_ID"
+          ARTIFACT_ID=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ github.repository }}/actions/artifacts | jq -r '.artifacts[0].id')
+          echo "Artifact ID: $ARTIFACT_ID"
+          echo "::set-output name=ARTIFACT_ID::$ARTIFACT_ID"
 
       - name: Download Artifact using REST API
         run: |
-              curl -L -o my-artifact.zip -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \ "https://api.github.com/repos/${{github.repository }}/actions/artifacts/$ARTIFACT_ID/zip"   
+          ARTIFACT_ID=${{ steps.fetch_checks.outputs.ARTIFACT_ID }}
+          curl -L -o my-artifact.zip -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip
 
       - name: Extract Artifact
         run: unzip my-artifact.zip  
@@ -49,7 +54,7 @@ jobs:
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
         run: |
           # Define file path for the downloaded artifact
-          FILE_PATH="./SFDX_Code_Scan_Report/scanner-report.csv"
+          FILE_PATH="./scanner-report.csv"
           
           # Encode the artifact in base64 for file upload
           BASE64_CONTENT=$(base64 "$FILE_PATH")
