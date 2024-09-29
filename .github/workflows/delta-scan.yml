@@ -50,7 +50,7 @@ jobs:
           fi
           cat changed_files.txt
 
-      - name: Upload changes.diff as artifact
+      - name: Upload changed_files.txt as artifact
         uses: actions/upload-artifact@v3
         with:
           name: changed_files.txt
@@ -62,6 +62,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
  
+      - name: Download changed_files.txt artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: changed_files.txt
+
       - name: Run SFDX Scanner on All Changed Files
         id: run-scanner
         run: |
@@ -84,12 +89,12 @@ jobs:
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
 
-      - name: Upload Scanner Report
+      - name: Upload scanner-report.csv as artifact
         uses: actions/upload-artifact@v3
         with:
-          name: SFDX_Code_Scan_Report
+          name: scanner-report.csv
           path: scanner-report.csv
- 
+
   run-salesforce-critical-permissions-check:
     needs: calculate-differences
     runs-on: ubuntu-latest
@@ -153,6 +158,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+ 
+      - name: Download scanner-report.csv artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: scanner-report.csv
 
       - name: Check for Severity 3 Vulnerabilities
         id: check-severity
@@ -196,3 +206,9 @@ jobs:
           git add .
           git commit -m "Code changes after vulnerability scan"
           git push origin HEAD:${{ github.head_ref }}
+ 
+      - name: Upload Scanner Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: SFDX_Code_Scan_Report
+          path: scanner-report.csv
