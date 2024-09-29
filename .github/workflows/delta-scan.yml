@@ -1,4 +1,4 @@
-name: Salesforce Code Scan on Pull Request
+name: Salesforce Code Scan and Critical Permissions Check on Pull Request
 
 on:
   pull_request:
@@ -72,7 +72,7 @@ jobs:
               echo "Blocking your pull request due to severity 3 vulnerabilities found."
               exit 1
             else
-              echo "No severity 3 vulnerabilities found. Proceeding with Aprroval."
+              echo "No severity 3 vulnerabilities found. Proceeding with Approval."
             fi
           else
             echo "No scanner report found."
@@ -85,3 +85,59 @@ jobs:
         with:
           name: SFDX_Code_Scan_Report
           path: scanner-report.csv
+
+  check-critical-permissions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Scan Profiles and Permission Sets for Critical Permissions
+        run: |
+          CRITICAL_PERMISSIONS=(
+            "Manage All Data"
+            "View All Data"
+            "Customize Application"
+            "Manage Encryption Keys"
+            "Reset User Passwords and Unlock Users"
+            "Manage Password Policies"
+            "Manage Profiles and Permission Sets"
+            "Assign Permission Sets"
+            "Password Never Expires"
+            "Manage Roles"
+            "Manage Internal Users"
+            "Manage Users"
+            "Author Apex"
+            "Manage Sharing"
+            "Multi-Factor Authentication for User Interface Logins"
+          )
+ 
+          BLOCKED_FILES=()
+ 
+          # Search through profiles
+          for FILE in $(find force-app/main/default/profiles -name '*.profile-meta.xml'); do
+            for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
+              if grep -q "$PERMISSION" "$FILE" && ! grep -q "System Administrator" "$FILE"; then
+                BLOCKED_FILES+=("$FILE")
+              fi
+            done
+          done
+ 
+          # Search through permission sets
+          for FILE in $(find force-app/main/default/permissionsets -name '*.permissionset-meta.xml'); do
+            for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
+              if grep -q "$PERMISSION" "$FILE" && ! grep -q "System Administrator" "$FILE"; then
+                BLOCKED_FILES+=("$FILE")
+              fi
+            done
+          done
+ 
+          if [ ${#BLOCKED_FILES[@]} -gt 0 ]; then
+            echo "Critical permissions found in the following files:"
+            for FILE in "${BLOCKED_FILES[@]}"; do
+              echo "$FILE"
+            done
+            exit 1
+          else
+            echo "No critical permissions assigned to non-System Administrator profiles or permission sets."
+          fi
