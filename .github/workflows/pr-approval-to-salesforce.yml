@@ -1,4 +1,4 @@
-name: PR Approval to Salesforce Workflow
+name: PR Approval Workflow
 
 on:
   pull_request_review:
@@ -33,40 +33,20 @@ jobs:
           echo "Check runs: $CHECK_RUNS"
           echo "$CHECK_RUNS" > check_runs.json
 
-      - name: Get Artifact ID using REST API
+      - name: Process completed check run data
+        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
+        id: process_checks
         run: |
-          ARTIFACT_ID=$(curl -H "Authorization: token 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" \
-            https://api.github.com/repos/naresh-art/TestingGitActions/actions/artifacts|
-            jq '.artifacts[0].id')
-          echo "Artifact ID: $ARTIFACT_ID"
-          echo "::set-output name=ARTIFACT_ID::$ARTIFACT_ID"
+          # Filter only completed checks
+          CHECK_NAMES=$(jq -r '.check_runs[] | select(.status == "completed") | .name' check_runs.json | paste -sd "," -)
+          CHECK_STATUSES=$(jq -r '.check_runs[] | select(.status == "completed") | .conclusion' check_runs.json | paste -sd "," -)
+          
+          echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
+          echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
 
-      - name: Download Artifact using REST API
-        run: |
-          ARTIFACT_ID=${{ steps.fetch_checks.outputs.ARTIFACT_ID }}
-          curl -L -o my-artifact.zip -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-          https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip
-
-      - name: Verify downloaded file (Debugging)
-        run: |
-          file my-artifact.zip  # Check if it's recognized as a ZIP file
-          ls -lh my-artifact.zip  # Show the file size for verification
-
-      - name: Extract Artifact
-        run: |
-          unzip my-artifact.zip  
-
-      - name: Attach Code Scan Report to Salesforce PR_Request__c
+      - name: Send PR Information to Salesforce
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
         run: |
-          # Define file path for the downloaded artifact
-          FILE_PATH="./scanner-report.csv"
-          
-          # Encode the artifact in base64 for file upload
-          BASE64_CONTENT=$(base64 "$FILE_PATH")
-          FILENAME="scanner-report.csv"
-
-          # Create the PR Request in Salesforce
           prStatus=${{ steps.pr_approval_check.outputs.PR_STATUS }}
           prComment="${{ github.event.review.body }}"
           
@@ -83,19 +63,4 @@ jobs:
                 "PR_Check_Status__c": "'"${{ steps.process_checks.outputs.CHECK_STATUSES }}"'",
                 "PR_Check_Name__c": "'"${{ steps.process_checks.outputs.CHECK_NAMES }}"'"
             }')
-
           echo "Response: $plRequestObjectResponse"
-          PR_REQUEST_ID=$(echo "$plRequestObjectResponse" | jq -r '.id')
-
-          # Attach the file to the PR_Request__c record in Salesforce
-          attachmentResponse=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Attachment/ \
-            -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "ParentId": "'"$PR_REQUEST_ID"'",
-              "Name": "'"$FILENAME"'",
-              "Body": "'"$BASE64_CONTENT"'",
-              "ContentType": "text/csv"
-            }')
-
-          echo "Attachment response: $attachmentResponse"
