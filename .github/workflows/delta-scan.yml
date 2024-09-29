@@ -61,7 +61,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
- 
+
+      - name: Install Salesforce CLI
+        run: npm install @salesforce/cli --global
+
+      - name: Install Scanner Plugin
+        run: sf plugins install @salesforce/sfdx-scanner
+
+      - name: Verify Salesforce CLI Installation
+        run: sf --version
+
+      - name: Verify Scanner Plugin Installation
+        run: sf plugins --core
+
       - name: Download changed_files.txt artifact
         uses: actions/download-artifact@v3
         with:
