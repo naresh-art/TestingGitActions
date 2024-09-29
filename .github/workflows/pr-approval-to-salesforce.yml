@@ -33,11 +33,17 @@ jobs:
           echo "Check runs: $CHECK_RUNS"
           echo "$CHECK_RUNS" > check_runs.json
 
-      - name: Download SFDX Code Scan Report from Delta Scan Workflow
-        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
-        uses: actions/download-artifact@v3
-        with:
-          name: SFDX_Code_Scan_Report
+      - name: Get Artifact ID using REST API
+        run: |
+            ARTIFACT_ID=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \"https://api.github.com/repos/${{github.repository }}/actions/artifacts" | jq '.artifacts[0].id')
+            echo "Artifact ID: $ARTIFACT_ID"
+
+      - name: Download Artifact using REST API
+        run: |
+              curl -L -o my-artifact.zip -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \ "https://api.github.com/repos/${{github.repository }}/actions/artifacts/$ARTIFACT_ID/zip"   
+
+      - name: Extract Artifact
+        run: unzip my-artifact.zip  
 
       - name: Attach Code Scan Report to Salesforce PR_Request__c
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
