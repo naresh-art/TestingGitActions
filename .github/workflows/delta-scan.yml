@@ -113,6 +113,13 @@ jobs:
             SF_AUTOUPDATE_DISABLE: 'true'
             SF_DISABLE_AUTOUPDATE: 'true'
  
+      - name: Upload Scanner Report and Rules as Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: SFDX_Code_Scan_Delta
+          path: |
+            scanner-report-*.csv
+
       - name: Block PR merge if severity violations are found
         run: |
           if [ -f scanner-report-$temp_file.csv ]; then
