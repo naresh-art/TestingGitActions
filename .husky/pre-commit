@@ -3,8 +3,8 @@
 #   echo "Error: pre-commit and post-commit files cannot be modified."
 #   exit 1
 # fi
-chmod 544 .husky/pre-commit
-chmod 544 .husky/post-commit
+# chmod 544 .husky/pre-commit
+# chmod 544 .husky/post-commit
 # Check if Husky is installed
 # if ! command -v husky &> /dev/null
 # then
