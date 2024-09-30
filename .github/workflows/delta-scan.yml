@@ -1,10 +1,10 @@
-name: Salesforce Code Scan on Pull Request
-
+name: Salesforce Code Scan and Critical Permissions Check on Pull Request
+ 
 on:
   pull_request:
     branches:
       - '**'
-
+ 
 jobs:
   run-code-scan:
     runs-on: ubuntu-latest
@@ -12,24 +12,24 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
+ 
       - name: Use Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 20.x
-
+ 
       - name: Install Salesforce CLI
         run: npm install @salesforce/cli --global
-
+ 
       - name: Install Scanner Plugin
         run: sf plugins install @salesforce/sfdx-scanner
-
+ 
       - name: Verify Salesforce CLI Installation
         run: sf --version
-
+ 
       - name: Verify Scanner Plugin Installation
         run: sf plugins --core
-
+ 
       - name: Get changed files
         id: get-changes
         run: |
@@ -41,7 +41,7 @@ jobs:
             echo "No previous commit to compare to." > changed_files.txt
           fi
           cat changed_files.txt
-
+ 
       - name: Run SFDX Scanner on All Changed Files
         id: run-scanner
         run: |
@@ -61,7 +61,7 @@ jobs:
           SF_LAZY_LOAD_MODULES: 'true'
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
-
+ 
       - name: Block PR merge if severity violations are found
         run: |
           if [ -f scanner-report.csv ]; then
@@ -72,16 +72,75 @@ jobs:
               echo "Blocking your pull request due to severity 3 vulnerabilities found."
               exit 1
             else
-              echo "No severity 3 vulnerabilities found. Proceeding with Aprroval."
+              echo "No severity 3 vulnerabilities found. Proceeding with Approval."
             fi
           else
             echo "No scanner report found."
             exit 1
           fi
-
+ 
       - name: Upload Scanner Report
         if: always()
         uses: actions/upload-artifact@v3
         with:
           name: SFDX_Code_Scan_Report
-          path: scanner-report.csv"
+          path: scanner-report.csv
+ 
+  check-critical-permissions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+ 
+      - name: Scan Profiles and Permission Sets for Critical Permissions
+        run: |
+          CRITICAL_PERMISSIONS=(
+              "AssignPermissionSets"
+              "AuthorApex"
+              "CustomizeApplication"
+              "FreezeUsers"
+              "ManageEncryptionKeys"
+              "ManageInternalUsers"
+              "ManagePasswordPolicies"
+              "ManageProfilesPermissionSets"
+              "ManageRoles"
+              "ManageSharing"
+              "ManageUsers"
+              "ModifyAllData"
+              "MonitorLoginHistory"
+              "MultiFactorAuthenticationRequired"
+              "PasswordNeverExpires"
+              "ResetPasswordsUnlockUsers"
+              "ViewAllData"
+          )
+ 
+          BLOCKED_FILES=()
+ 
+          # Search through profiles
+          for FILE in $(find force-app/main/default/profiles -name '*.profile-meta.xml'); do
+            for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
+              if grep -q "$PERMISSION" "$FILE" && ! grep -q "System Administrator" "$FILE"; then
+                BLOCKED_FILES+=("$FILE")
+              fi
+            done
+          done
+ 
+          # Search through permission sets
+          for FILE in $(find force-app/main/default/permissionsets -name '*.permissionset-meta.xml'); do
+            for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
+              if grep -q "$PERMISSION" "$FILE"; then
+                BLOCKED_FILES+=("$FILE")
+              fi
+            done
+          done
+ 
+          if [ ${#BLOCKED_FILES[@]} -gt 0 ]; then
+            echo "Critical permissions found in the following files:"
+            for FILE in "${BLOCKED_FILES[@]}"; do
+              echo "$FILE"
+            done
+            exit 1
+          else
+            echo "No critical permissions assigned to non-System Administrator profiles or permission sets."
+          fi
+ 
