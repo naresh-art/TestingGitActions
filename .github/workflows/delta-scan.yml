@@ -80,7 +80,7 @@ jobs:
           fi
  
       - name: Upload Scanner Report
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v3
         with:
           name: SFDX_Code_Scan_Report
