@@ -67,6 +67,7 @@ jobs:
               if [ -n "$changed_lines" ]; then
                 echo "Changed lines in $file:"
                 echo "$changed_lines"
+                
                 # Create a temporary file with a valid method structure
                 temp_file="temp_${file//\//_}"
                 echo "/* Temporary file for changed lines scan */" > "$temp_file"
@@ -76,6 +77,7 @@ jobs:
                 echo "$changed_lines" >> "$temp_file"
                 echo "        /* End of extracted changed lines */" >> "$temp_file"
                 echo "    }" >> "$temp_file"
+
                 # Check for unbalanced braces (ensure the method and class are closed properly)
                 open_braces=$(echo "$changed_lines" | grep -o '{' | wc -l)
                 close_braces=$(echo "$changed_lines" | grep -o '}' | wc -l)
@@ -85,11 +87,14 @@ jobs:
                     echo "}" >> "$temp_file"
                   done
                 fi
+
                 echo "}" >> "$temp_file"  # Close the class
                 echo "Created temporary file with method structure: $temp_file"
+
                 # Run the SFDX scanner on the temporary file
                 echo "Running SFDX scanner on temporary file $temp_file"
                 sf scanner:run --target "$temp_file" --format "csv" --outfile "scanner-report-$temp_file.csv" || { echo "Scanner run failed"; exit 1; }
+                
                 # Check if the scanner report was generated
                 if [ -s "scanner-report-$temp_file.csv" ]; then
                   echo "Scanner report generated for $temp_file."
@@ -102,6 +107,7 @@ jobs:
                   echo "No scanner report generated for $temp_file."
                   exit 0  # Exit gracefully if no report was generated
                 fi
+                
                 # Clean up the temporary file after scanning
                 rm "$temp_file"
               else
