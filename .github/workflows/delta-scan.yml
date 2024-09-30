@@ -47,28 +47,38 @@ jobs:
         run: |
           files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
+          
+          # Clear any previous scanner report to ensure fresh results
+          rm -f scanner-report.csv
+          touch scanner-report.csv  # Create an empty file if no relevant files are found
+          
           if [ -n "$files" ]; then
             # Process all files individually in a loop
             for file in $files; do
               echo "Running scanner on $file"
-              sf scanner:run --target "$file" --format csv --outfile scanner-report.csv || { echo "Scanner run failed on $file"; exit 1; }
+              
+              # Run the scanner and save the result to a temporary file
+              sf scanner:run --target "$file" --format csv --outfile temp-scanner-report.csv || { echo "Scanner run failed on $file"; exit 1; }
+              
+              # Append the contents of the temporary scanner report to the main scanner report, skipping the header
+              if [ -s scanner-report.csv ]; then
+                tail -n +2 temp-scanner-report.csv >> scanner-report.csv  # Skip header when appending
+              else
+                cat temp-scanner-report.csv >> scanner-report.csv  # Include header for the first file
+              fi
             done
+            
+            # Remove the temporary file after appending
+            rm temp-scanner-report.csv
           else
             echo "No relevant files changed."
-            touch scanner-report.csv
           fi
         env:
           SF_LAZY_LOAD_MODULES: 'true'
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
+        
  
-      - name: Upload Scanner Report
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: SFDX_Code_Scan_Report
-          path: scanner-report.csv
-
       - name: Block PR merge if severity violations are found
         run: |
           if [ -f scanner-report.csv ]; then
@@ -89,7 +99,12 @@ jobs:
             exit 1
           fi
  
-
+      - name: Upload Scanner Report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: SFDX_Code_Scan_Report
+          path: scanner-report.csv
  
   quality-gate-critical-permissions-check:
     runs-on: ubuntu-latest
