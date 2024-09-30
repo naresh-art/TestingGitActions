@@ -3,6 +3,7 @@
 #   echo "Error: pre-commit and post-commit files cannot be modified."
 #   exit 1
 # fi
+chmod 544 .pre-commit
 # Check if Husky is installed
 if ! command -v husky &> /dev/null
 then
@@ -12,7 +13,7 @@ then
     # Initialize Husky hooks if it's not already set up
     npx husky install
 else
-    echo "Husky is already installed Sucessfully."
+    echo "Husky is already installed Sucessfully done."
 fi
 
 # Get the list of changed Apex (.cls) or LWC files
