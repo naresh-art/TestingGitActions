@@ -51,7 +51,7 @@ jobs:
             # Process all files individually in a loop
             for file in $files; do
               echo "Running scanner on $file"
-              sf scanner:run --target "$file" --format csv --outfile scanner-report.csv --category "Performance" || { echo "Scanner run failed on $file"; exit 1; }
+              sf scanner:run --target "$file" --format csv --outfile scanner-report.csv || { echo "Scanner run failed on $file"; exit 1; }
             done
           else
             echo "No relevant files changed."
@@ -80,7 +80,7 @@ jobs:
           fi
 
       - name: Upload Scanner Report
-        if: success()
+        if: always()
         uses: actions/upload-artifact@v3
         with:
           name: SFDX_Code_Scan_Report
