@@ -163,13 +163,4 @@ jobs:
           else
             echo "No critical permissions assigned to non-System Administrator profiles or permission sets."
           fi
-
-  send-email-on-failure:
-    runs-on: ubuntu-latest
-    needs: quality-gate-code-check
-    if: ${{ needs.quality-gate-code-check.outputs.block-pr == 'true' }}  # Only run if the code scan failed
-    steps:
-      - name: Send email
-        run: |
-          echo "Sending email about code scan failure."
-          # Add your email-sending logic here
+          
