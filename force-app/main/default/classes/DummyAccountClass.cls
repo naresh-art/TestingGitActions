@@ -35,10 +35,11 @@ public with sharing class DummyAccountClass {
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
-                    acc.Description = 'Happy Welcome';
+                    acc.Description = 'Happy Welcome Account Checks Data';
                 }
             }
             insert accList;
+            // System.debug('Test 1 seviorityyy testsss data 234');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
@@ -64,7 +65,6 @@ public with sharing class DummyAccountClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
-                // System.debug('Welcome To Account Creation');
             }
         } else {
             throw new CustomException('You do not have permission to create Opportunity records.');

@@ -1,4 +1,4 @@
-name: Salesforce Code Scan on Pull Request
+name: Salesforce Code Scan and Critical Permissions Check on Pull Request
 
 on:
   pull_request:
@@ -6,8 +6,11 @@ on:
       - '**'
 
 jobs:
-  run-code-scan:
+  quality-gate-code-check:
     runs-on: ubuntu-latest
+    outputs:
+      scanner-report-path: ${{ steps.upload-report.outputs.artifact-path }}  # Outputs the artifact path to pass to the next job
+      block-pr: ${{ steps.block-check.outputs.block-status }}  # Pass the block status
     steps:
       - uses: actions/checkout@v3
         with:
@@ -47,32 +50,43 @@ jobs:
         run: |
           files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
           echo "Files to scan: $files"
+
+          rm -f scanner-report.csv
+          touch scanner-report.csv  # Create an empty file if no relevant files are found
+
           if [ -n "$files" ]; then
-            # Process all files individually in a loop
             for file in $files; do
               echo "Running scanner on $file"
-              sf scanner:run --target "$file" --format csv --outfile scanner-report.csv --category "Performance" || { echo "Scanner run failed on $file"; exit 1; }
+              sf scanner:run --target "$file" --format csv --outfile temp-scanner-report.csv || { echo "Scanner run failed on $file"; exit 1; }
+              if [ -s scanner-report.csv ]; then
+                tail -n +2 temp-scanner-report.csv >> scanner-report.csv  # Skip header when appending
+              else
+                cat temp-scanner-report.csv >> scanner-report.csv  # Include header for the first file
+              fi
             done
+            rm temp-scanner-report.csv
           else
             echo "No relevant files changed."
-            touch scanner-report.csv
           fi
         env:
           SF_LAZY_LOAD_MODULES: 'true'
           SF_AUTOUPDATE_DISABLE: 'true'
           SF_DISABLE_AUTOUPDATE: 'true'
 
-      - name: Block PR merge if severity 3 violations are found
+      - name: Block PR merge if severity violations are found
+        id: block-check
         run: |
           if [ -f scanner-report.csv ]; then
-            # Assuming 'severity' is the third column in the CSV
+            echo "Processing scanner-report.csv"
             severity_fail_count=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner-report.csv)
             echo "Severity 3 issues count: $severity_fail_count"
             if [ "$severity_fail_count" -gt 0 ]; then
               echo "Blocking your pull request due to severity 3 vulnerabilities found."
+              echo "::set-output name=block-status::true"
               exit 1
             else
-              echo "No severity 3 vulnerabilities found. Proceeding."
+              echo "No severity 3 vulnerabilities found. Proceeding with Approval."
+              echo "::set-output name=block-status::false"
             fi
           else
             echo "No scanner report found."
@@ -80,8 +94,73 @@ jobs:
           fi
 
       - name: Upload Scanner Report
-        if: success()
+        id: upload-report
+        if: always()
         uses: actions/upload-artifact@v3
         with:
           name: SFDX_Code_Scan_Report
           path: scanner-report.csv
+
+  quality-gate-critical-permissions-check:
+    runs-on: ubuntu-latest
+    needs: quality-gate-code-check
+    if: ${{ needs.quality-gate-code-check.outputs.block-pr == 'false' }}  # Only run this job if the code scan passes
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download Scanner Report
+        uses: actions/download-artifact@v3
+        with:
+          name: SFDX_Code_Scan_Report
+
+      - name: Scan Profiles and Permission Sets for Critical Permissions
+        run: |
+          CRITICAL_PERMISSIONS=(
+              "AssignPermissionSets"
+              "AuthorApex"
+              "CustomizeApplication"
+              "FreezeUsers"
+              "ManageEncryptionKeys"
+              "ManageInternalUsers"
+              "ManagePasswordPolicies"
+              "ManageProfilesPermissionSets"
+              "ManageRoles"
+              "ManageSharing"
+              "ManageUsers"
+              "ModifyAllData"
+              "MonitorLoginHistory"
+              "MultiFactorAuthenticationRequired"
+              "PasswordNeverExpires"
+              "ResetPasswordsUnlockUsers"
+              "ViewAllData"
+          )
+
+          BLOCKED_FILES=()
+
+          for FILE in $(find force-app/main/default/profiles -name '*.profile-meta.xml'); do
+            for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
+              if grep -q "$PERMISSION" "$FILE" && ! grep -q "System Administrator" "$FILE"; then
+                BLOCKED_FILES+=("$FILE")
+              fi
+            done
+          done
+
+          for FILE in $(find force-app/main/default/permissionsets -name '*.permissionset-meta.xml'); do
+            for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
+              if grep -q "$PERMISSION" "$FILE"; then
+                BLOCKED_FILES+=("$FILE")
+              fi
+            done
+          done
+
+          if [ ${#BLOCKED_FILES[@]} -gt 0 ]; then
+            echo "Critical permissions found in the following files:"
+            for FILE in "${BLOCKED_FILES[@]}"; do
+              echo "$FILE"
+            done
+            exit 1
+          else
+            echo "No critical permissions assigned to non-System Administrator profiles or permission sets."
+          fi
+          
