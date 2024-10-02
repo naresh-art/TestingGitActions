@@ -5,3 +5,9 @@ index ef69a94..2f8382f 100644
 @@ -68 +68 @@ public with sharing class AccountInsertClass {
 -            System.debug('Test 1 seviorityyy test Test data 34567');
 +            System.debug('Test 1 seviorityyy test Test data 345678');
+diff --git a/force-app/main/default/classes/AccountInsertClass.cls b/force-app/main/default/classes/AccountInsertClass.cls
+index 2f8382f..a5c9e9d 100644
+--- a/force-app/main/default/classes/AccountInsertClass.cls
++++ b/force-app/main/default/classes/AccountInsertClass.cls
+@@ -47,0 +48 @@ public with sharing class AccountInsertClass {
++                System.debug('Test 1 seviorityyy test Test data 12345678');

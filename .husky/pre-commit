@@ -33,7 +33,7 @@ fi
 echo "Changed lines:"
 cat "$diff_file"
 
-# Run the SFDX scanner on the original files (because the scanner needs full context)
+# Run the SFDX scanner on the original files (scanner needs full context to check for violations)
 sf scanner:run --target "${changed_files_array[@]}" --format "json" --outfile "precommit-scanner-report.json"
 
 # Check if the JSON report exists
@@ -42,23 +42,31 @@ if [ ! -f "precommit-scanner-report.json" ]; then
   exit 1
 fi
 
-# Extract violations that match the lines changed in the diff file
-grep -B5 -A5 "$(cat $diff_file)" precommit-scanner-report.json > filtered-violations.json
+# Extract line numbers from the diff to match with scanner report
+echo "Extracting line numbers for changed lines..."
+changed_line_numbers=$(grep -oP '@@\s-\d+,\d+\s+\+\K\d+' "$diff_file")
 
-# Check for violations with severity 3 in the filtered result
-severity_fail_count=$(grep -oP '"severity":\s*(3)' filtered-violations.json | wc -l)
+# Parse the violations from the scanner report that match changed line numbers
+echo "Checking violations in changed lines..."
+violations_in_changed_lines=0
 
-# Output the fail count for debugging
-echo "Severity Fail Count::::::"
-echo "$severity_fail_count"
+# Loop through the line numbers and check if there are any matching violations
+for line_number in $changed_line_numbers; do
+  # Grep the JSON report for violations in this line number
+  if grep -q "\"beginLine\": $line_number" precommit-scanner-report.json; then
+    # If a violation exists in this line number, increment the count
+    violations_in_changed_lines=$((violations_in_changed_lines + 1))
+  fi
+done
 
-# Block commit if there are severity 3 issues
-if [ "$severity_fail_count" -gt 0 ]; then
-  echo "Blocking your commit due to vulnerabilities found with severity 3."
-  # Optionally display the report for the user
-  cat filtered-violations.json
+# Output the violation count for debugging
+echo "Number of violations found in changed lines: $violations_in_changed_lines"
+
+# Block commit if there are violations in the changed lines
+if [ "$violations_in_changed_lines" -gt 0 ]; then
+  echo "Blocking your commit due to violations found in changed lines."
   exit 1
 else
-  echo "No vulnerabilities found. Proceeding with commit."
+  echo "No violations found in changed lines. Proceeding with commit."
   exit 0
 fi
