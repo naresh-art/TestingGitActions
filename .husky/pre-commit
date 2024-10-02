@@ -12,25 +12,25 @@ fi
 # Convert changed_files into an array
 changed_files_array=($changed_files)
 
-# Initialize a temp file to hold the diff data (for newly changed lines)
+# Initialize a temp file to hold the diff data
 diff_file="changed_lines.diff"
 
-# Collect the newly added/changed lines for each file
+# Collect only the newly added or modified lines for each file
 for file in "${changed_files_array[@]}"
 do
   echo "Collecting changed lines for file: $file"
-  # Get only the newly added lines (those prefixed with +) and ignore context lines (-U0 for no context)
-  git diff --cached -U0 "$file" | grep '^+[^+]' >> "$diff_file"
+  # Get only the added lines starting with '+', ignoring context or deletions
+  git diff --cached -U0 "$file" | grep '^\+' | grep -v '^\+\+\+' >> "$diff_file"
 done
 
 # Check if the diff file contains any data
 if [ ! -s "$diff_file" ]; then
-  echo "No newly added/changed lines found."
+  echo "No changed lines found."
   exit 0
 fi
 
 # Display the diff file for debugging purposes
-echo "Newly added/changed lines:"
+echo "Newly added or modified lines:"
 cat "$diff_file"
 
 # Run the SFDX scanner on the original files (scanner needs full context to check for violations)
@@ -42,31 +42,31 @@ if [ ! -f "precommit-scanner-report.json" ]; then
   exit 1
 fi
 
-# Extract violation line numbers from the scanner report
-echo "Extracting violation line numbers from scanner report..."
-grep -oP '"beginLine":\s*\d+' precommit-scanner-report.json | grep -oP '\d+' > violation_lines.txt
+# Extract line numbers from the diff
+echo "Extracting line numbers for changed lines..."
+changed_line_numbers=$(grep -oP '@@\s-\d+,\d+\s+\+\K\d+' "$diff_file")
 
-# Extract line numbers from the newly changed lines in the diff
-echo "Extracting changed line numbers..."
-grep -n '^+' "$diff_file" | cut -d: -f1 > changed_lines.txt
-
-# Check if any violation line numbers match the newly changed lines
+# Parse the violations from the scanner report
+echo "Checking violations for new lines..."
 violations_in_changed_lines=0
-while read -r changed_line; do
-  # Check if there are any violations in this line
-  if grep -q "^$changed_line$" violation_lines.txt; then
+
+# Loop through the line numbers and check if there are any matching violations
+for line_number in $changed_line_numbers; do
+  # Grep the JSON report for violations in this line number
+  if grep -q "\"beginLine\": $line_number" precommit-scanner-report.json; then
+    # If a violation exists in this line number, increment the count
     violations_in_changed_lines=$((violations_in_changed_lines + 1))
   fi
-done < changed_lines.txt
+done
 
 # Output the violation count for debugging
 echo "Number of violations found in changed lines: $violations_in_changed_lines"
 
 # Block commit if there are violations in the changed lines
 if [ "$violations_in_changed_lines" -gt 0 ]; then
-  echo "Blocking your commit due to violations found in changed lines."
+  echo "Blocking your commit due to violations found in the newly changed lines."
   exit 1
 else
-  echo "No violations found in changed lines. Proceeding with commit."
+  echo "No violations found in newly changed lines. Proceeding with commit."
   exit 0
 fi
