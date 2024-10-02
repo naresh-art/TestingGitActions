@@ -12,40 +12,52 @@ fi
 # Convert changed_files into an array
 changed_files_array=($changed_files)
 
-# Initialize a temp file to hold the diff data for changed lines only
-diff_file="changed_lines.diff"
-
-# Collect only the changed lines (without context) for each file
-for file in "${changed_files_array[@]}"
-do
-  echo "Collecting changed lines for file: $file"
-  # Get changed lines only (-U0 for no context)
-  git diff --cached -U0 "$file" >> "$diff_file"
-done
-
-# Check if the diff file contains any data
-if [ ! -s "$diff_file" ]; then
-  echo "No changed lines found."
-  exit 0
-fi
-
-# Display the diff file for debugging purposes
-echo "Changed lines:"
-cat "$diff_file"
-
-# Save the changed lines to a temporary file for scanning
+# Initialize a temp file to hold the full class with changed lines
 temp_scan_file="temp_scan.cls"
 
-# Extract only the changed lines (lines starting with '+') and save them to temp_scan_file
-grep '^+' "$diff_file" | sed 's/^+//' > "$temp_scan_file"
+# Start with an empty file
+> "$temp_scan_file"
+
+# Collect the diff (changed lines) for each file and reconstruct the class structure
+for file in "${changed_files_array[@]}"
+do
+  echo "Processing file: $file"
+
+  # Extract only the changed lines (lines starting with '+') and remove the '+' symbol
+  changed_lines=$(git diff --cached -U0 "$file" | grep '^+' | sed 's/^+//')
+
+  # Get the class declaration from the original file (looks for 'public class', 'with sharing', etc.)
+  class_declaration=$(grep -E 'public|global.*class' "$file")
+  
+  # Find the line number where the class declaration starts and the class opens with '{'
+  class_opening_line=$(grep -nE 'public|global.*class' "$file" | head -n 1 | cut -d ':' -f 1)
+  
+  # Find the line number of the closing brace for the class
+  class_closing_line=$(grep -nE '^\s*\}\s*$' "$file" | tail -n 1 | cut -d ':' -f 1)
+
+  # If a valid class structure is found, proceed with reconstruction
+  if [ -n "$class_declaration" ] && [ -n "$class_opening_line" ] && [ -n "$class_closing_line" ]; then
+    # Write the class declaration and the opening part of the class to the temp file
+    head -n "$class_opening_line" "$file" > "$temp_scan_file"
+    
+    # Append the changed lines into the reconstructed class
+    echo "$changed_lines" >> "$temp_scan_file"
+
+    # Append the closing part of the class from the original file
+    tail -n +"$class_closing_line" "$file" >> "$temp_scan_file"
+  else
+    echo "Unable to reconstruct the class structure for $file"
+    exit 1
+  fi
+done
 
 # Check if the temp_scan_file has data to scan
 if [ ! -s "$temp_scan_file" ]; then
-  echo "No changed lines to scan."
+  echo "No valid class structure to scan."
   exit 0
 fi
 
-# Run the SFDX scanner on the extracted changed lines
+# Run the SFDX scanner on the reconstructed temp file
 sf scanner:run --target "$temp_scan_file" --format "json" --outfile "precommit-scanner-report.json"
 
 # Check if the JSON report exists
@@ -64,8 +76,6 @@ echo "$severity_fail_count"
 # Block commit if there are severity 3 issues
 if [ "$severity_fail_count" -gt 0 ]; then
   echo "Blocking your commit due to vulnerabilities found with severity 3."
-  # Optionally display the report for the user
-  # cat precommit-scanner-report.json
   exit 1
 else
   echo "No vulnerabilities found. Proceeding with commit."
