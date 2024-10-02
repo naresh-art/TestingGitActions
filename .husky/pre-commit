@@ -23,8 +23,8 @@ for file in "${changed_files_array[@]}"
 do
   echo "Processing file: $file"
 
-  # Extract only the changed lines (lines starting with '+') and remove the '+' symbol
-  changed_lines=$(git diff --cached -U0 "$file" | grep '^+' | sed 's/^+//')
+  # Extract only the changed lines (lines starting with '+') and remove the '+' symbol, ignoring invalid diff headers
+  changed_lines=$(git diff --cached -U0 "$file" | grep '^+' | grep -v '+++' | sed 's/^+//')
 
   # Get the class declaration from the original file (looks for 'public class', 'with sharing', etc.)
   class_declaration=$(grep -E 'public|global.*class' "$file")
@@ -56,6 +56,10 @@ if [ ! -s "$temp_scan_file" ]; then
   echo "No valid class structure to scan."
   exit 0
 fi
+
+# Display the content of the temp_scan_file for debugging purposes
+echo "Reconstructed class to scan:"
+cat "$temp_scan_file"
 
 # Run the SFDX scanner on the reconstructed temp file
 sf scanner:run --target "$temp_scan_file" --format "json" --outfile "precommit-scanner-report.json"
