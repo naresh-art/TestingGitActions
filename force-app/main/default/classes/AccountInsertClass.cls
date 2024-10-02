@@ -45,6 +45,7 @@ public with sharing class AccountInsertClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
+                System.debug('Test 1 seviorityyy test Test data 12345678');
             }
         } else {
             throw new CustomException('You do not have permission to create Opportunity records.');

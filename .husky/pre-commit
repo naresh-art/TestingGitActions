@@ -19,6 +19,7 @@ diff_file="changed_lines.diff"
 for file in "${changed_files_array[@]}"
 do
   echo "Collecting changed lines for file: $file"
+  # Get only the changed lines (-U0 for no context)
   git diff --cached -U0 "$file" >> "$diff_file"
 done
 
@@ -28,8 +29,12 @@ if [ ! -s "$diff_file" ]; then
   exit 0
 fi
 
-# Run the SFDX scanner on the changed lines file
-sf scanner:run --target "$diff_file" --format "json" --outfile "precommit-scanner-report.json"
+# Display the diff file for debugging purposes
+echo "Changed lines:"
+cat "$diff_file"
+
+# Run the SFDX scanner on the original files (because the scanner needs full context)
+sf scanner:run --target "${changed_files_array[@]}" --format "json" --outfile "precommit-scanner-report.json"
 
 # Check if the JSON report exists
 if [ ! -f "precommit-scanner-report.json" ]; then
@@ -37,8 +42,11 @@ if [ ! -f "precommit-scanner-report.json" ]; then
   exit 1
 fi
 
-# Manually parse the JSON and check for severity 3 issues within violations array
-severity_fail_count=$(grep -oP '"severity":\s*(3)' precommit-scanner-report.json | wc -l)
+# Extract violations that match the lines changed in the diff file
+grep -B5 -A5 "$(cat $diff_file)" precommit-scanner-report.json > filtered-violations.json
+
+# Check for violations with severity 3 in the filtered result
+severity_fail_count=$(grep -oP '"severity":\s*(3)' filtered-violations.json | wc -l)
 
 # Output the fail count for debugging
 echo "Severity Fail Count::::::"
@@ -48,7 +56,7 @@ echo "$severity_fail_count"
 if [ "$severity_fail_count" -gt 0 ]; then
   echo "Blocking your commit due to vulnerabilities found with severity 3."
   # Optionally display the report for the user
-  # cat precommit-scanner-report.json
+  cat filtered-violations.json
   exit 1
 else
   echo "No vulnerabilities found. Proceeding with commit."
