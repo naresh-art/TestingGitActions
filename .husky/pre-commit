@@ -26,31 +26,25 @@ do
   # Extract only the changed lines (lines starting with '+') and remove the '+' symbol, ignoring invalid diff headers
   changed_lines=$(git diff --cached -U0 "$file" | grep '^+' | grep -v '+++' | sed 's/^+//')
 
-  # Get the class declaration from the original file (looks for 'public class', 'with sharing', etc.)
-  class_declaration=$(grep -E 'public|global.*class' "$file")
-  
-  # Find the line number where the class declaration starts and the class opens with '{'
-  class_opening_line=$(grep -nE 'public|global.*class' "$file" | head -n 1 | cut -d ':' -f 1)
-  
-  # Find the line number of the closing brace for the class
-  class_closing_line=$(grep -nE '^\s*\}\s*$' "$file" | tail -n 1 | cut -d ':' -f 1)
+  # Get the class declaration and all lines before the opening brace
+  class_header=$(awk '/class/{f=1} f{print; if ($0 ~ /\{/){exit}}' "$file")
+
+  # Find the closing line of the class
+  class_footer=$(grep -nE '^\s*\}\s*$' "$file" | tail -n 1 | cut -d ':' -f 1)
+
+  # Extract everything from the last changed line to the closing brace
+  footer_content=$(tail -n +"$class_footer" "$file")
 
   # If a valid class structure is found, proceed with reconstruction
-  if [ -n "$class_declaration" ] && [ -n "$class_opening_line" ] && [ -n "$class_closing_line" ]; then
-    echo "Reconstructing class for scanning..."
-
-    # Write the class declaration and the opening part of the class to the temp file
-    head -n "$class_opening_line" "$file" > "$temp_scan_file"
+  if [ -n "$class_header" ] && [ -n "$class_footer" ]; then
+    # Write the class header to the temp file
+    echo "$class_header" > "$temp_scan_file"
     
-    # Append the changed lines into the reconstructed class if they exist
-    if [ -n "$changed_lines" ]; then
-      echo "$changed_lines" >> "$temp_scan_file"
-    else
-      echo "// No significant changes detected in this commit" >> "$temp_scan_file"
-    fi
+    # Append the changed lines into the reconstructed class
+    echo "$changed_lines" >> "$temp_scan_file"
 
-    # Append the closing part of the class from the original file
-    tail -n +"$class_closing_line" "$file" >> "$temp_scan_file"
+    # Append the class closing brace from the original file
+    echo "$footer_content" >> "$temp_scan_file"
   else
     echo "Unable to reconstruct the class structure for $file"
     exit 1
