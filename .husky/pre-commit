@@ -1,4 +1,21 @@
 #!/bin/bash
+# if git diff --name-only --cached | grep -q ".husky/pre-commit\|.husky/post-commit"; then
+#   echo "Error: pre-commit and post-commit files cannot be modified."
+#   exit 1
+# fi
+# chmod 544 .husky/pre-commit
+# chmod 544 .husky/post-commit
+# Check if Husky is installed
+# if ! command -v husky &> /dev/null
+# then
+#     echo "Husky is not installed. Installing Husky..."
+#     npm install husky --save-dev
+
+#     # Initialize Husky hooks if it's not already set up
+#     npx husky install
+# else
+#     echo "Husky is already installed Sucessfully done."
+# fi
 
 # Get the list of changed Apex (.cls) or LWC files
 changed_files=$(git diff --cached --name-only | grep -E '\.cls$|\.lwc$')
@@ -12,28 +29,7 @@ fi
 # Convert changed_files into an array
 changed_files_array=($changed_files)
 
-# Initialize a temp file to hold the diff data
-diff_file="changed_lines.diff"
-
-# Collect the diffs (changed lines only) for each file
-for file in "${changed_files_array[@]}"
-do
-  echo "Collecting changed lines for file: $file"
-  # Get changed lines only (-U0 for no context)
-  git diff --cached -U0 "$file" >> "$diff_file"
-done
-
-# Check if the diff file contains any data
-if [ ! -s "$diff_file" ]; then
-  echo "No changed lines found."
-  exit 0
-fi
-
-# Display the diff file for debugging purposes
-echo "Changed lines:"
-cat "$diff_file"
-
-# Run the SFDX scanner on the original files (scanner checks full files but we will filter)
+# Run the SFDX scanner on each of the changed files
 sf scanner:run --target "${changed_files_array[@]}" --format "json" --outfile "precommit-scanner-report.json"
 
 # Check if the JSON report exists
@@ -42,31 +38,20 @@ if [ ! -f "precommit-scanner-report.json" ]; then
   exit 1
 fi
 
-# Extract line numbers from the diff to match with scanner report
-echo "Extracting line numbers for changed lines..."
-changed_line_numbers=$(grep -oP '@@\s-\d+,\d+\s+\+\K\d+' "$diff_file")
+# Manually parse the JSON and check for severity 3 issues within violations array
+severity_fail_count=$(grep -oP '"severity":\s*(1)' precommit-scanner-report.json | wc -l)
 
-# Parse the violations from the scanner report
-echo "Checking violations in changed lines..."
-violations_in_changed_lines=0
+# Output the fail count for debugging
+echo "Severity Fail Count::::::"
+echo "$severity_fail_count"
 
-# Loop through the line numbers and check if there are any matching violations
-for line_number in $changed_line_numbers; do
-  # Grep the JSON report for violations in this line number
-  if grep -q "\"beginLine\": $line_number" precommit-scanner-report.json; then
-    # If a violation exists in this line number, increment the count
-    violations_in_changed_lines=$((violations_in_changed_lines + 1))
-  fi
-done
-
-# Output the violation count for debugging
-echo "Number of violations found in changed lines: $violations_in_changed_lines"
-
-# Block commit if there are violations in the changed lines
-if [ "$violations_in_changed_lines" -gt 0 ]; then
-  echo "Blocking your commit due to violations found in changed lines."
+# Block commit if there are severity 3 issues
+if [ "$severity_fail_count" -gt 0 ]; then
+  echo "Blocking your commit due to vulnerabilities found with severity 3."
+  # Optionally display the report for the user
+  # cat precommit-scanner-report.json
   exit 1
 else
-  echo "No violations found in changed lines. Proceeding with commit."
+  echo "No vulnerabilities found. Proceeding with commit."
   exit 0
 fi
