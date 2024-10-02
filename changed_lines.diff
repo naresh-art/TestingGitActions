@@ -18,3 +18,77 @@ index a5c9e9d..87a2fea 100644
 @@ -69 +69 @@ public with sharing class AccountInsertClass {
 -            System.debug('Test 1 seviorityyy test Test data 345678');
 +            System.debug('Test 1 seviorityyy test Test data 123456789');
+diff --git a/force-app/main/default/classes/AccountInsertClass.cls b/force-app/main/default/classes/AccountInsertClass.cls
+index 87a2fea..0874358 100644
+--- a/force-app/main/default/classes/AccountInsertClass.cls
++++ b/force-app/main/default/classes/AccountInsertClass.cls
+@@ -45,7 +45,7 @@ public with sharing class AccountInsertClass {
+             }
+             if(oppList.size() > 0){
+                 insert oppList;
+-                System.debug('Test 1 seviorityyy test Test data 12345678');
++                System.debug('Test 1 seviorityyy test Test data 123456789');
+             }
+         } else {
+             throw new CustomException('You do not have permission to create Opportunity records.');
+@@ -66,7 +66,7 @@ public with sharing class AccountInsertClass {
+                 }
+             }
+             insert accList;
+-            System.debug('Test 1 seviorityyy test Test data 123456789');
++            System.debug('Test 1 seviorityyy test Test data 1234567891');
+         } else {
+             throw new CustomException('You do not have permission to create Account records.');
+         }
+diff --git a/force-app/main/default/classes/AccountInsertClass.cls b/force-app/main/default/classes/AccountInsertClass.cls
+index 0874358..72c9f7a 100644
+--- a/force-app/main/default/classes/AccountInsertClass.cls
++++ b/force-app/main/default/classes/AccountInsertClass.cls
+@@ -45,7 +45,7 @@ public with sharing class AccountInsertClass {
+             }
+             if(oppList.size() > 0){
+                 insert oppList;
+-                System.debug('Test 1 seviorityyy test Test data 123456789');
++                System.debug('Test 1 seviorityyy test Test data 1234567891');
+             }
+         } else {
+             throw new CustomException('You do not have permission to create Opportunity records.');
+@@ -66,7 +66,7 @@ public with sharing class AccountInsertClass {
+                 }
+             }
+             insert accList;
+-            System.debug('Test 1 seviorityyy test Test data 1234567891');
++            System.debug('Test 1 seviorityyy test Test data 12345678912');
+         } else {
+             throw new CustomException('You do not have permission to create Account records.');
+         }
+diff --git a/force-app/main/default/classes/AccountInsertClass.cls b/force-app/main/default/classes/AccountInsertClass.cls
+index 0874358..5192340 100644
+--- a/force-app/main/default/classes/AccountInsertClass.cls
++++ b/force-app/main/default/classes/AccountInsertClass.cls
+@@ -20,6 +20,7 @@ public with sharing class AccountInsertClass {
+                 }
+             }
+             insert accList;
++            System.debug('Test 1 seviorityyy test Test data 123');
+         } else {
+             throw new CustomException('You do not have permission to create Account records.');
+         }
+@@ -45,7 +46,7 @@ public with sharing class AccountInsertClass {
+             }
+             if(oppList.size() > 0){
+                 insert oppList;
+-                System.debug('Test 1 seviorityyy test Test data 123456789');
++                System.debug('Test 1 seviorityyy test Test data 1234567891');
+             }
+         } else {
+             throw new CustomException('You do not have permission to create Opportunity records.');
+@@ -66,7 +67,7 @@ public with sharing class AccountInsertClass {
+                 }
+             }
+             insert accList;
+-            System.debug('Test 1 seviorityyy test Test data 1234567891');
++            System.debug('Test 1 seviorityyy test Test data 12345678912');
+         } else {
+             throw new CustomException('You do not have permission to create Account records.');
+         }

@@ -20,6 +20,7 @@ public with sharing class AccountInsertClass {
                 }
             }
             insert accList;
+            System.debug('Test 1 seviorityyy test Test data 12345');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
@@ -45,7 +46,7 @@ public with sharing class AccountInsertClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
-                System.debug('Test 1 seviorityyy test Test data 123456789');
+                System.debug('Test 1 seviorityyy test Test data 1234567891');
             }
         } else {
             throw new CustomException('You do not have permission to create Opportunity records.');
@@ -66,7 +67,7 @@ public with sharing class AccountInsertClass {
                 }
             }
             insert accList;
-            System.debug('Test 1 seviorityyy test Test data 1234567891');
+            System.debug('Test 1 seviorityyy test Test data 12345678912');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
