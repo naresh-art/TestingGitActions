@@ -20,6 +20,7 @@ public with sharing class DummyAccountClass {
                 }
             }
             insert accList;
+            // System.debug('Test 1 seviority check');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
@@ -35,11 +36,11 @@ public with sharing class DummyAccountClass {
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
-                    acc.Description = 'Happy Welcome Account Checks Data';
+                    acc.Description = 'Happy Welcome Account Checks';
                 }
             }
             insert accList;
-            // System.debug('Test 1 seviorityyy testsss data 234');
+            System.debug('Test 1 seviorityyy testsss data base123');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
