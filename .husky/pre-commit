@@ -106,7 +106,7 @@ NR == 1 || (substr($4, 2, length($4)-2) in valid) {  # Check if Line (stripped o
 ' scanner-report.csv > filtered-scanner-report.csv
 
 # Check if the filtered scanner report contains severity 3 or higher violations
-severity_fail_count=$(grep -oP '"severity":\s*(1)' filtered-scanner-report.csv | wc -l)
+severity_fail_count=$(grep -oP '"severity":\s*(1|3)' filtered-scanner-report.csv | wc -l)
 
 # Output the fail count for debugging
 echo "Severity Fail Count::::::"
