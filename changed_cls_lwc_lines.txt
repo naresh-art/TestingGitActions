@@ -1,4 +1,0 @@
-Line 23 :             // System.debug('Test 1 seviorityyy test Test data 1234566778');
-Line 49 :                 // System.debug('Test 1 seviorityyy test Test data 1234567891');
-Line 70 :             // System.debug('Test 1 seviorityyy test Test data testing days 12345678');
-Line 38 :                     acc.Description = 'Happy Welcome Account Checks';
