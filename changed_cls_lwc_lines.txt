@@ -1,0 +1,13 @@
+Line 0 : diff --git a/force-app/main/default/classes/AccountInsertClass.cls b/force-app/main/default/classes/AccountInsertClass.cls
+Line 1 : index 1705687..0cabfab 100644
+Line 2 : --- a/force-app/main/default/classes/AccountInsertClass.cls
+Line 3 : @@ -70 +70 @@ public with sharing class AccountInsertClass {
+Line 4 : -            // System.debug('Test 1 seviorityyy test Test data testing days 12345678');
+Line 5 : diff --git a/force-app/main/default/classes/DummyAccountClass.cls b/force-app/main/default/classes/DummyAccountClass.cls
+Line 6 : index d89071b..1db2286 100644
+Line 7 : --- a/force-app/main/default/classes/DummyAccountClass.cls
+Line 8 : @@ -42 +42 @@ public with sharing class DummyAccountClass {
+Line 9 : -            // System.debug('Test 1 seviorityyy testsss data 234');
+Line 70 :             System.debug('Test 1 seviorityyy test Test data testing days 12345678');
+Line 220 :             System.debug('Test 1 seviority check');
+Line 42 :             System.debug('Test 1 seviorityyy testsss data 234');

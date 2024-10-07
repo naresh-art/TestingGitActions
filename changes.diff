@@ -1,0 +1,330 @@
+diff --git a/.husky/pre-commit b/.husky/pre-commit
+index cf53fcc..f071406 100644
+--- a/.husky/pre-commit
++++ b/.husky/pre-commit
+@@ -2,17 +1,0 @@
+-# if git diff --name-only --cached | grep -q ".husky/pre-commit\|.husky/post-commit"; then
+-#   echo "Error: pre-commit and post-commit files cannot be modified."
+-#   exit 1
+-# fi
+-# chmod 544 .husky/pre-commit
+-# chmod 544 .husky/post-commit
+-# Check if Husky is installed
+-# if ! command -v husky &> /dev/null
+-# then
+-#     echo "Husky is not installed. Installing Husky..."
+-#     npm install husky --save-dev
+-
+-#     # Initialize Husky hooks if it's not already set up
+-#     npx husky install
+-# else
+-#     echo "Husky is already installed Sucessfully done."
+-# fi
+@@ -29,2 +12,2 @@ fi
+-# Convert changed_files into an array
+-changed_files_array=($changed_files)
++# Extract and print only the changed lines and line numbers from .cls and .lwc files
++git diff --unified=0 --cached > changes.diff
+@@ -32,2 +15,8 @@ changed_files_array=($changed_files)
+-# Run the SFDX scanner on each of the changed files
+-sf scanner:run --target "${changed_files_array[@]}" --format "json" --outfile "precommit-scanner-report.json"
++# Process changes only for .cls and .lwc files
++awk '
++  BEGIN {valid_file=0}
++  /^diff --git/ {valid_file=0}
++  /\.cls$|\.lwc$/ {valid_file=1}
++  /^@@/ && valid_file {split($0, arr, " "); gsub(",", "", arr[2]); start = substr(arr[2], 2); line_offset=0; next}  
++  /^[+][^+]/ && valid_file {print "Line", start + line_offset++, ":", substr($0, 2)}  
++' changes.diff | grep -v '^+++' > changed_cls_lwc_lines.txt
+@@ -35,4 +24,13 @@ sf scanner:run --target "${changed_files_array[@]}" --format "json" --outfile "p
+-# Check if the JSON report exists
+-if [ ! -f "precommit-scanner-report.json" ]; then
+-  echo "Scanner report not found. Please check the scanner command."
+-  exit 1
++# Check if any relevant changes were found in .cls or .lwc files
++if [ ! -s changed_cls_lwc_lines.txt ]; then
++  echo "No changes detected in .cls or .lwc files."
++  exit 0
++fi
++
++# Get the list of changed files (only .cls and .lwc files)
++files=$(grep -E '^\+\+\+ b/.*(\.cls|\.lwc)$' changes.diff | sed 's/+++ b\///')
++
++# Check if files were found
++if [ -z "$files" ]; then
++  echo "No changed .cls or .lwc files detected."
++  exit 0
+@@ -41,2 +39,66 @@ fi
+-# Manually parse the JSON and check for severity 3 issues within violations array
+-severity_fail_count=$(grep -oP '"severity":\s*(1)' precommit-scanner-report.json | wc -l)
++# Declare an array to store the line numbers
++declare -a line_numbers_array=()
++
++# Loop through each changed file
++while IFS= read -r file; do
++  echo "Processing file: $file"
++  
++  # Extract the actual changed lines and line numbers for the specific file
++  changed_lines=$(grep -A 1000 "$file" changes.diff | grep '^\+' | sed 's/^+//')
++  line_numbers=$(grep -A 1000 "$file" changes.diff | grep '^@@' | awk '{print $2}' | cut -d',' -f1 | sed 's/-//')
++
++  echo "Changed lines in $file:"
++  echo "$changed_lines"
++  echo "Line numbers corresponding to the changed lines in $file:"
++  echo "$line_numbers"
++
++  # Reset the index for each file
++  current_line_number=$(echo "$line_numbers" | head -1)
++  echo "Starting line number: $current_line_number"
++
++  # Iterate through changed lines
++  while IFS= read -r line; do
++    echo "Mapping changed line: '$line' to original line number: $current_line_number"
++    echo "Running SFDX Scanner on file: $file at line number: $current_line_number..."
++
++    # Run the SFDX scanner on each file and line
++    sf scanner:run --target "$file" --format "json" --outfile "scanner-report.json" || {
++      echo "Scanner run failed or no issues found for $file, continuing with other files."
++    }
++
++    # Store the current line number in the array
++    line_numbers_array+=("$current_line_number")
++    current_line_number=$((current_line_number + 1))
++  done <<< "$changed_lines"
++
++done <<< "$files"
++
++# Store the line numbers array in a file for later use
++echo "${line_numbers_array[*]}" > line_numbers.txt
++cat line_numbers.txt
++
++# Read the line numbers from the file
++current_line_number_list=$(cat line_numbers.txt)
++echo "Current_Line_Number_List: $current_line_number_list"
++
++# Ensure there are no leading/trailing spaces in the line number list
++current_line_number_list=$(echo $current_line_number_list | xargs)
++
++echo "Filtering scanner report for the following line numbers: $current_line_number_list"
++
++# Filter the scanner report based on the changed line numbers
++awk -v lines="$current_line_number_list" '
++BEGIN {
++  FPAT = "([^,]+)|(\"[^\"]+\")";  # Define how to match CSV fields
++  split(lines, arr, " ");
++  for (i in arr) {
++    valid[arr[i]] = 1;  # Treat line numbers as strings
++  }
++}
++NR == 1 || (substr($4, 2, length($4)-2) in valid) {  # Check if Line (stripped of quotes) is in valid lines
++  print $0;  # Only print matching rows
++}
++' scanner-report.json > filtered-scanner-report.json
++
++# Check if any severity 3 violations are found in the filtered report
++severity_fail_count=$(grep -oP '"severity":\s*(3)' filtered-scanner-report.json | wc -l)
+@@ -51,2 +112,0 @@ if [ "$severity_fail_count" -gt 0 ]; then
+-  # Optionally display the report for the user
+-  # cat precommit-scanner-report.json
+@@ -57 +117 @@ else
+-fi
+\ No newline at end of file
++fi
+diff --git a/changed_cls_lwc_lines.txt b/changed_cls_lwc_lines.txt
+new file mode 100644
+index 0000000..6ed9146
+--- /dev/null
++++ b/changed_cls_lwc_lines.txt
+@@ -0,0 +1,2 @@
++Line 70 :             System.debug('Test 1 seviorityyy test Test data testing days 12345678');
++Line 42 :             System.debug('Test 1 seviorityyy testsss data 234');
+diff --git a/changes.diff b/changes.diff
+new file mode 100644
+index 0000000..0464e02
+--- /dev/null
++++ b/changes.diff
+@@ -0,0 +1,146 @@
++diff --git a/.husky/pre-commit b/.husky/pre-commit
++index cf53fcc..f071406 100644
++--- a/.husky/pre-commit
+++++ b/.husky/pre-commit
++@@ -2,17 +1,0 @@
++-# if git diff --name-only --cached | grep -q ".husky/pre-commit\|.husky/post-commit"; then
++-#   echo "Error: pre-commit and post-commit files cannot be modified."
++-#   exit 1
++-# fi
++-# chmod 544 .husky/pre-commit
++-# chmod 544 .husky/post-commit
++-# Check if Husky is installed
++-# if ! command -v husky &> /dev/null
++-# then
++-#     echo "Husky is not installed. Installing Husky..."
++-#     npm install husky --save-dev
++-
++-#     # Initialize Husky hooks if it's not already set up
++-#     npx husky install
++-# else
++-#     echo "Husky is already installed Sucessfully done."
++-# fi
++@@ -29,2 +12,2 @@ fi
++-# Convert changed_files into an array
++-changed_files_array=($changed_files)
+++# Extract and print only the changed lines and line numbers from .cls and .lwc files
+++git diff --unified=0 --cached > changes.diff
++@@ -32,2 +15,8 @@ changed_files_array=($changed_files)
++-# Run the SFDX scanner on each of the changed files
++-sf scanner:run --target "${changed_files_array[@]}" --format "json" --outfile "precommit-scanner-report.json"
+++# Process changes only for .cls and .lwc files
+++awk '
+++  BEGIN {valid_file=0}
+++  /^diff --git/ {valid_file=0}
+++  /\.cls$|\.lwc$/ {valid_file=1}
+++  /^@@/ && valid_file {split($0, arr, " "); gsub(",", "", arr[2]); start = substr(arr[2], 2); line_offset=0; next}  
+++  /^[+][^+]/ && valid_file {print "Line", start + line_offset++, ":", substr($0, 2)}  
+++' changes.diff | grep -v '^+++' > changed_cls_lwc_lines.txt
++@@ -35,4 +24,13 @@ sf scanner:run --target "${changed_files_array[@]}" --format "json" --outfile "p
++-# Check if the JSON report exists
++-if [ ! -f "precommit-scanner-report.json" ]; then
++-  echo "Scanner report not found. Please check the scanner command."
++-  exit 1
+++# Check if any relevant changes were found in .cls or .lwc files
+++if [ ! -s changed_cls_lwc_lines.txt ]; then
+++  echo "No changes detected in .cls or .lwc files."
+++  exit 0
+++fi
+++
+++# Get the list of changed files (only .cls and .lwc files)
+++files=$(grep -E '^\+\+\+ b/.*(\.cls|\.lwc)$' changes.diff | sed 's/+++ b\///')
+++
+++# Check if files were found
+++if [ -z "$files" ]; then
+++  echo "No changed .cls or .lwc files detected."
+++  exit 0
++@@ -41,2 +39,66 @@ fi
++-# Manually parse the JSON and check for severity 3 issues within violations array
++-severity_fail_count=$(grep -oP '"severity":\s*(1)' precommit-scanner-report.json | wc -l)
+++# Declare an array to store the line numbers
+++declare -a line_numbers_array=()
+++
+++# Loop through each changed file
+++while IFS= read -r file; do
+++  echo "Processing file: $file"
+++  
+++  # Extract the actual changed lines and line numbers for the specific file
+++  changed_lines=$(grep -A 1000 "$file" changes.diff | grep '^\+' | sed 's/^+//')
+++  line_numbers=$(grep -A 1000 "$file" changes.diff | grep '^@@' | awk '{print $2}' | cut -d',' -f1 | sed 's/-//')
+++
+++  echo "Changed lines in $file:"
+++  echo "$changed_lines"
+++  echo "Line numbers corresponding to the changed lines in $file:"
+++  echo "$line_numbers"
+++
+++  # Reset the index for each file
+++  current_line_number=$(echo "$line_numbers" | head -1)
+++  echo "Starting line number: $current_line_number"
+++
+++  # Iterate through changed lines
+++  while IFS= read -r line; do
+++    echo "Mapping changed line: '$line' to original line number: $current_line_number"
+++    echo "Running SFDX Scanner on file: $file at line number: $current_line_number..."
+++
+++    # Run the SFDX scanner on each file and line
+++    sf scanner:run --target "$file" --format "json" --outfile "scanner-report.json" || {
+++      echo "Scanner run failed or no issues found for $file, continuing with other files."
+++    }
+++
+++    # Store the current line number in the array
+++    line_numbers_array+=("$current_line_number")
+++    current_line_number=$((current_line_number + 1))
+++  done <<< "$changed_lines"
+++
+++done <<< "$files"
+++
+++# Store the line numbers array in a file for later use
+++echo "${line_numbers_array[*]}" > line_numbers.txt
+++cat line_numbers.txt
+++
+++# Read the line numbers from the file
+++current_line_number_list=$(cat line_numbers.txt)
+++echo "Current_Line_Number_List: $current_line_number_list"
+++
+++# Ensure there are no leading/trailing spaces in the line number list
+++current_line_number_list=$(echo $current_line_number_list | xargs)
+++
+++echo "Filtering scanner report for the following line numbers: $current_line_number_list"
+++
+++# Filter the scanner report based on the changed line numbers
+++awk -v lines="$current_line_number_list" '
+++BEGIN {
+++  FPAT = "([^,]+)|(\"[^\"]+\")";  # Define how to match CSV fields
+++  split(lines, arr, " ");
+++  for (i in arr) {
+++    valid[arr[i]] = 1;  # Treat line numbers as strings
+++  }
+++}
+++NR == 1 || (substr($4, 2, length($4)-2) in valid) {  # Check if Line (stripped of quotes) is in valid lines
+++  print $0;  # Only print matching rows
+++}
+++' scanner-report.json > filtered-scanner-report.json
+++
+++# Check if any severity 3 violations are found in the filtered report
+++severity_fail_count=$(grep -oP '"severity":\s*(3)' filtered-scanner-report.json | wc -l)
++@@ -51,2 +112,0 @@ if [ "$severity_fail_count" -gt 0 ]; then
++-  # Optionally display the report for the user
++-  # cat precommit-scanner-report.json
++@@ -57 +117 @@ else
++-fi
++\ No newline at end of file
+++fi
++diff --git a/force-app/main/default/classes/AccountInsertClass.cls b/force-app/main/default/classes/AccountInsertClass.cls
++index 1705687..0cabfab 100644
++--- a/force-app/main/default/classes/AccountInsertClass.cls
+++++ b/force-app/main/default/classes/AccountInsertClass.cls
++@@ -70 +70 @@ public with sharing class AccountInsertClass {
++-            // System.debug('Test 1 seviorityyy test Test data testing days 12345678');
+++            System.debug('Test 1 seviorityyy test Test data testing days 12345678');
++diff --git a/force-app/main/default/classes/DummyAccountClass.cls b/force-app/main/default/classes/DummyAccountClass.cls
++index d89071b..1db2286 100644
++--- a/force-app/main/default/classes/DummyAccountClass.cls
+++++ b/force-app/main/default/classes/DummyAccountClass.cls
++@@ -42 +42 @@ public with sharing class DummyAccountClass {
++-            // System.debug('Test 1 seviorityyy testsss data 234');
+++            System.debug('Test 1 seviorityyy testsss data 234');
+diff --git a/filtered-scanner-report.json b/filtered-scanner-report.json
+new file mode 100644
+index 0000000..9ec4e00
+--- /dev/null
++++ b/filtered-scanner-report.json
+@@ -0,0 +1 @@
++[{"engine":"pmd","fileName":"C:\\Git Check CICD\\TestingGitActions\\force-app\\main\\default\\classes\\DummyAccountClass.cls","violations":[{"line":42,"column":13,"endLine":42,"endColumn":64,"severity":3,"ruleName":"AvoidDebugStatements","category":"Performance","url":"https://docs.pmd-code.org/pmd-doc-7.4.0/pmd_rules_apex_performance.html#avoiddebugstatements","message":"\r\nAvoid debug statements since they impact on performance\r\n"},{"line":42,"column":13,"endLine":42,"endColumn":64,"severity":3,"ruleName":"DebugsShouldUseLoggingLevel","category":"Best Practices","url":"https://docs.pmd-code.org/pmd-doc-7.4.0/pmd_rules_apex_bestpractices.html#debugsshoulduselogginglevel","message":"\r\nCalls to System.debug should specify a logging level.\r\n"}]}]
+diff --git a/force-app/main/default/classes/AccountInsertClass.cls b/force-app/main/default/classes/AccountInsertClass.cls
+index 1705687..0cabfab 100644
+--- a/force-app/main/default/classes/AccountInsertClass.cls
++++ b/force-app/main/default/classes/AccountInsertClass.cls
+@@ -70 +70 @@ public with sharing class AccountInsertClass {
+-            // System.debug('Test 1 seviorityyy test Test data testing days 12345678');
++            System.debug('Test 1 seviorityyy test Test data testing days 12345678');
+diff --git a/force-app/main/default/classes/DummyAccountClass.cls b/force-app/main/default/classes/DummyAccountClass.cls
+index d89071b..667fa67 100644
+--- a/force-app/main/default/classes/DummyAccountClass.cls
++++ b/force-app/main/default/classes/DummyAccountClass.cls
+@@ -22,0 +23 @@ public with sharing class DummyAccountClass {
++            System.debug('Test 1 seviority check');
+@@ -42 +43 @@ public with sharing class DummyAccountClass {
+-            // System.debug('Test 1 seviorityyy testsss data 234');
++            System.debug('Test 1 seviorityyy testsss data 234');
+diff --git a/line_numbers.txt b/line_numbers.txt
+new file mode 100644
+index 0000000..026a238
+--- /dev/null
++++ b/line_numbers.txt
+@@ -0,0 +1 @@
++70 71 72 73 42 43
+diff --git a/scanner-report.json b/scanner-report.json
+new file mode 100644
+index 0000000..64665fc
+--- /dev/null
++++ b/scanner-report.json
+@@ -0,0 +1 @@
++[{"engine":"pmd","fileName":"C:\\Git Check CICD\\TestingGitActions\\force-app\\main\\default\\classes\\DummyAccountClass.cls","violations":[{"line":42,"column":13,"endLine":42,"endColumn":64,"severity":3,"ruleName":"AvoidDebugStatements","category":"Performance","url":"https://docs.pmd-code.org/pmd-doc-7.4.0/pmd_rules_apex_performance.html#avoiddebugstatements","message":"\r\nAvoid debug statements since they impact on performance\r\n"},{"line":42,"column":13,"endLine":42,"endColumn":64,"severity":3,"ruleName":"DebugsShouldUseLoggingLevel","category":"Best Practices","url":"https://docs.pmd-code.org/pmd-doc-7.4.0/pmd_rules_apex_bestpractices.html#debugsshoulduselogginglevel","message":"\r\nCalls to System.debug should specify a logging level.\r\n"}]}]
+\ No newline at end of file
