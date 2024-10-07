@@ -17,13 +17,16 @@ jobs:
           if [[ "${{ github.event.review.state }}" == "approved" ]]; then
             echo "PR Approved"
             echo "::set-output name=PR_STATUS::approved"
-          else  
+          elif [[ "${{ github.event.review.state }}" == "changes_requested" ]]; then
+            echo "PR Changes Requested"
+            echo "::set-output name=PR_STATUS::rejected"
+          else
             echo "PR Not Approved"
             exit 1
           fi
 
       - name: Fetch all check runs for the PR
-        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
+        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved' || steps.pr_approval_check.outputs.PR_STATUS == 'rejected'
         id: fetch_checks
         run: |
           CHECK_RUNS=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
@@ -34,7 +37,7 @@ jobs:
           echo "$CHECK_RUNS" > check_runs.json
 
       - name: Process completed check run data
-        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
+        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved' || steps.pr_approval_check.outputs.PR_STATUS == 'rejected'
         id: process_checks
         run: |
           # Filter only completed checks
@@ -45,7 +48,7 @@ jobs:
           echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
 
       - name: Send PR Information to Salesforce
-        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved'
+        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved' || steps.pr_approval_check.outputs.PR_STATUS == 'rejected'
         run: |
           prStatus=${{ steps.pr_approval_check.outputs.PR_STATUS }}
           prComment="${{ github.event.review.body }}"
@@ -64,3 +67,4 @@ jobs:
                 "PR_Check_Name__c": "'"${{ steps.process_checks.outputs.CHECK_NAMES }}"'"
             }')
           echo "Response: $plRequestObjectResponse"
+          
