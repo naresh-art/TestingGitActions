@@ -5,32 +5,31 @@ changed_files=$(git diff --cached --name-only | grep -E '\.cls$|\.lwc$')
 
 # Check if there are any relevant changes
 if [ -z "$changed_files" ]; then
-  echo "No relevant changes to scan."
+  echo "No relevant changes to scan in the files."
   exit 0
 fi
 
-# Check for previous commit to compare changes
-if [ "$(git rev-list --count HEAD)" -gt "1" ]; then
-  echo "Fetching changed files and lines between HEAD~1 and HEAD"
-  git diff --unified=0 HEAD~1 HEAD > changes.diff || { echo "Failed to get git diff"; exit 1; }
-else
-  echo "No previous commit to compare to." > changes.diff
-fi
+# Convert changed_files into an array
+changed_files_array=($changed_files)
+
+# Get the changed files and lines using git diff
+echo "Fetching changed files and lines between HEAD~1 and HEAD"
+git diff --unified=0 HEAD~1 HEAD > changes.diff || { echo "Failed to get git diff"; exit 1; }
 
 # Check if diff has any content
 if [ ! -s changes.diff ]; then
-  echo "No changes detected."
+  echo "No changes detected between HEAD~1 and HEAD."
   exit 0
 fi
 
 # Extract and print only the changed lines and line numbers from .cls and .lwc files
-echo "Processing changes for .cls and .lwc files..."
+echo "Processing changes for .cls and .lwc files only..."
 awk '
   BEGIN {valid_file=0}
   /^diff --git/ {valid_file=0}
   /\.cls$|\.lwc$/ {valid_file=1}
-  /^@@/ && valid_file {split($0, arr, " "); gsub(",", "", arr[2]); start = substr(arr[2], 2); line_offset=0; next}
-  /^[+][^+]/ && valid_file {print "Line", start + line_offset++, ":", substr($0, 2)}
+  /^@@/ && valid_file {split($0, arr, " "); gsub(",", "", arr[2]); start = substr(arr[2], 2); line_offset=0; next}  
+  /^[+][^+]/ && valid_file {print "Line", start + line_offset++, ":", substr($0, 2)}  
 ' changes.diff | grep -v '^+++' > changed_cls_lwc_lines.txt
 
 # Check if any relevant changes were found in .cls or .lwc files
@@ -56,6 +55,8 @@ declare -a line_numbers_array=()
 # Loop through each changed file
 while IFS= read -r file; do
   echo "Processing file: $file"
+  
+  file=$(echo "$file" | tr -d '"') # Clean up the file path
 
   # Extract the actual changed lines and line numbers for the specific file
   changed_lines=$(grep -A 1000 "$file" changes.diff | grep '^\+' | sed 's/^+//')
@@ -72,9 +73,12 @@ while IFS= read -r file; do
 
   # Iterate through changed lines
   while IFS= read -r line; do
+    echo "Mapping changed line: '$line' to original line number: $current_line_number"
     echo "Running SFDX Scanner on file: $file at line number: $current_line_number..."
+
+    # Run the SFDX scanner on each file and line
     sf scanner:run --target "$file" --format "csv" --outfile "scanner-report.csv" || {
-      echo "Scanner run failed for $file."
+      echo "Scanner run failed or no issues found for $file, continuing with other files."
     }
 
     # Store the current line number in the array
@@ -88,10 +92,8 @@ done <<< "$files"
 echo "${line_numbers_array[*]}" > line_numbers.txt
 cat line_numbers.txt
 
-# Filter the scanner report by line numbers
-echo "Filtering scanner report for the relevant line numbers."
-
-# Ensure the scanner report is filtered correctly
+# Filter the scanner report based on the changed line numbers
+echo "Filtering scanner report by line numbers..."
 awk -v lines="$(cat line_numbers.txt)" '
 BEGIN {
   FPAT = "([^,]+)|(\"[^\"]+\")";  # Define how to match CSV fields
@@ -101,20 +103,16 @@ BEGIN {
   }
 }
 NR == 1 || (substr($4, 2, length($4)-2) in valid) {  # Check if Line (stripped of quotes) is in valid lines
-  print $0;  # Only print matching rows
+  print $0;
 }
 ' scanner-report.csv > filtered-scanner-report.csv
 
-# Check if the filtered scanner report contains severity 3 or higher violations
-severity_fail_count=$(grep -oP '"severity":\s*(1|3)' filtered-scanner-report.csv | wc -l)
+# Check if there are any severity 3 or higher issues within the filtered report
+severity_fail_count=$(grep -oP '"severity":\s*(3|4|5)' filtered-scanner-report.csv | wc -l)
 
-# Output the fail count for debugging
-echo "Severity Fail Count::::::"
-echo "$severity_fail_count"
-
-# Block commit if there are severity 3 issues
+# Block commit if there are severity 3 or higher issues
 if [ "$severity_fail_count" -gt 0 ]; then
-  echo "Blocking your commit due to vulnerabilities found with severity 3."
+  echo "Blocking your commit due to vulnerabilities found with severity 3 or higher."
   exit 1
 else
   echo "No vulnerabilities found. Proceeding with commit."
