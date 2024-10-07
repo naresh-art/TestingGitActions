@@ -1,4 +1,21 @@
 #!/bin/bash
+# if git diff --name-only --cached | grep -q ".husky/pre-commit\|.husky/post-commit"; then
+#   echo "Error: pre-commit and post-commit files cannot be modified."
+#   exit 1
+# fi
+# chmod 544 .husky/pre-commit
+# chmod 544 .husky/post-commit
+# Check if Husky is installed
+# if ! command -v husky &> /dev/null
+# then
+#     echo "Husky is not installed. Installing Husky..."
+#     npm install husky --save-dev
+
+#     # Initialize Husky hooks if it's not already set up
+#     npx husky install
+# else
+#     echo "Husky is already installed Sucessfully done."
+# fi
 
 # Get the list of changed Apex (.cls) or LWC files
 changed_files=$(git diff --cached --name-only | grep -E '\.cls$|\.lwc$')
@@ -9,106 +26,30 @@ if [ -z "$changed_files" ]; then
   exit 0
 fi
 
-# Fetch the changes between the current and previous commits
-git diff --unified=0 HEAD~1 HEAD > changes.diff || { echo "Failed to get git diff"; exit 1; }
+# Convert changed_files into an array
+changed_files_array=($changed_files)
 
-# Extract and print only the changed lines and line numbers from .cls and .lwc files
-awk '
-  BEGIN {valid_file=0}
-  /^diff --git/ {valid_file=0}
-  /\.cls$|\.lwc$/ {valid_file=1}
-  /^@@/ && valid_file {split($0, arr, " "); gsub(",", "", arr[2]); start = substr(arr[2], 2); line_offset=0; next}
-  /^[+][^+]/ && valid_file {print "Line", start + line_offset++, ":", substr($0, 2)}
-' changes.diff | grep -v '^+++' > changed_cls_lwc_lines.txt
+# Run the SFDX scanner on each of the changed files
+sf scanner:run --target "${changed_files_array[@]}" --format "json" --outfile "precommit-scanner-report.json"
 
-# Check if any relevant changes were found in .cls or .lwc files
-if [ ! -s changed_cls_lwc_lines.txt ]; then
-  echo "No changes detected in .cls or .lwc files."
-  exit 0
+# Check if the JSON report exists
+if [ ! -f "precommit-scanner-report.json" ]; then
+  echo "Scanner report not found. Please check the scanner command."
+  exit 1
 fi
 
-# Display the changed lines for debugging purposes
-echo "Changed lines in .cls and .lwc files:"
-cat changed_cls_lwc_lines.txt
+# Manually parse the JSON and check for severity 3 issues within violations array
+severity_fail_count=$(grep -oP '"severity":\s*(1)' precommit-scanner-report.json | wc -l)
 
-# Get the changed .cls and .lwc files from the diff
-files=$(grep -E '^\+\+\+ b/.*(\.cls|\.lwc)$' changes.diff | sed 's/+++ b\///')
-
-# Check if files were found
-if [ -z "$files" ]; then
-  echo "No changed .cls or .lwc files detected."
-  exit 0
-fi
-
-# Declare an array to store the line numbers
-declare -a line_numbers_array=()
-
-# Loop through each changed file
-while IFS= read -r file; do
-  echo "Processing file: $file"
-  file=$(echo "$file" | tr -d '"') # Clean up the file path
-
-  # Extract the actual changed lines and line numbers for the specific file
-  changed_lines=$(grep -A 1000 "$file" changes.diff | grep '^\+' | sed 's/^+//')
-  line_numbers=$(grep -A 1000 "$file" changes.diff | grep '^@@' | awk '{print $2}' | cut -d',' -f1 | sed 's/-//')
-
-  echo "Changed lines in $file:"
-  echo "$changed_lines"
-  echo "Line numbers corresponding to the changed lines in $file:"
-  echo "$line_numbers"
-
-  # Reset the index for each file
-  current_line_number=$(echo "$line_numbers" | head -1)
-  echo "Starting line number: $current_line_number"
-
-  # Iterate through changed lines
-  while IFS= read -r line; do
-    echo "Mapping changed line: '$line' to original line number: $current_line_number"
-    echo "Running SFDX Scanner on file: $file at line number: $current_line_number..."
-
-    # Run the SFDX scanner on each file and line
-    sf scanner:run --target "$file" --format "csv" --outfile "scanner-report.csv" || {
-      echo "Scanner run failed or no issues found for $file, continuing with other files."
-    }
-
-    # Store the current line number in the array
-    line_numbers_array+=("$current_line_number")
-    current_line_number=$((current_line_number + 1))
-  done <<< "$changed_lines"
-
-done <<< "$files"
-
-# Store the line numbers array in a file for later use
-echo "${line_numbers_array[*]}" > line_numbers.txt
-cat line_numbers.txt
-
-# Filter the scanner report by line numbers
-current_line_number_list=$(cat line_numbers.txt)
-echo "Filtering scanner report for the following line numbers: $current_line_number_list"
-
-# Use FPAT to correctly parse the CSV columns, treating each quoted field as a separate field
-awk -v lines="$current_line_number_list" '
-BEGIN {
-  FPAT = "([^,]+)|(\"[^\"]+\")";  # Define how to match CSV fields
-  split(lines, arr, " ");
-  for (i in arr) {
-    valid[arr[i]] = 1;  # Treat line numbers as strings
-  }
-}
-NR == 1 || (substr($4, 2, length($4)-2) in valid) {  # Check if Line (stripped of quotes) is in valid lines
-  print $0;  # Only print matching rows, no debug output
-}
-' scanner-report.csv > filtered-scanner-report.csv
-
-echo "Filtered scanner report:"
-cat filtered-scanner-report.csv
-
-# Check for severity issues in the filtered report
-severity_fail_count=$(grep -oP '"severity":\s*(3)' filtered-scanner-report.csv | wc -l)
+# Output the fail count for debugging
+echo "Severity Fail Count::::::"
+echo "$severity_fail_count"
 
 # Block commit if there are severity 3 issues
 if [ "$severity_fail_count" -gt 0 ]; then
   echo "Blocking your commit due to vulnerabilities found with severity 3."
+  # Optionally display the report for the user
+  # cat precommit-scanner-report.json
   exit 1
 else
   echo "No vulnerabilities found. Proceeding with commit."
