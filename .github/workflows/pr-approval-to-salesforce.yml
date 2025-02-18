@@ -7,90 +7,72 @@ on:
     types: [closed]  # Triggers when a PR is merged
 
 jobs:
-  pr_approval:
+  pr_process:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check if PR is approved
-        id: pr_approval_check
+      - name: Determine PR Status
+        id: pr_status_check
         run: |
+          PR_STATUS="Pending"
+          MERGED_BY=""
+          
           if [[ "${{ github.event.review.state }}" == "approved" ]]; then
-            echo "PR Approved"
-            echo "::set-output name=PR_STATUS::approved"
+            PR_STATUS="Approved"
           elif [[ "${{ github.event.review.state }}" == "changes_requested" ]]; then
-            echo "PR Changes Requested"
-            echo "::set-output name=PR_STATUS::rejected"
-          else
-            echo "PR Not Approved"
-            exit 1
+            PR_STATUS="Changes Requested"
           fi
 
+          if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
+            PR_STATUS="Merged"
+            MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
+          fi
+
+          echo "Final PR Status: $PR_STATUS"
+          echo "::set-output name=PR_STATUS::$PR_STATUS"
+          echo "::set-output name=MERGED_BY::$MERGED_BY"
+
       - name: Fetch all check runs for the PR
-        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved' || steps.pr_approval_check.outputs.PR_STATUS == 'rejected'
         id: fetch_checks
         run: |
-          CHECK_RUNS=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-          -H "Accept: application/vnd.github.v3+json" \
-          https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs)
+          CHECK_RUNS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs)
 
-          echo "Check runs: $CHECK_RUNS"
-          echo "$CHECK_RUNS" > check_runs.json
+          CHECK_NAMES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | .name' | paste -sd "," -)
+          CHECK_STATUSES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | .conclusion' | paste -sd "," -)
 
-      - name: Process completed check run data
-        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved' || steps.pr_approval_check.outputs.PR_STATUS == 'rejected'
-        id: process_checks
-        run: |
-          CHECK_NAMES=$(jq -r '.check_runs[] | select(.status == "completed") | .name' check_runs.json | paste -sd "," -)
-          CHECK_STATUSES=$(jq -r '.check_runs[] | select(.status == "completed") | .conclusion' check_runs.json | paste -sd "," -)
-          
           echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
           echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
 
-      - name: Send PR Information to Salesforce (Approval Case)
-        if: steps.pr_approval_check.outputs.PR_STATUS == 'approved' || steps.pr_approval_check.outputs.PR_STATUS == 'rejected'
+      - name: Send PR Information to Salesforce
         run: |
-          prStatus=${{ steps.pr_approval_check.outputs.PR_STATUS }}
+          prStatus="${{ steps.pr_status_check.outputs.PR_STATUS }}"
+          mergedBy="${{ steps.pr_status_check.outputs.MERGED_BY }}"
           prComment="${{ github.event.review.body }}"
 
-          plRequestObjectResponse=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/ \
+          # JSON payload with conditional fields
+          PAYLOAD='{
+            "PR_Title__c": "'"${{ github.event.pull_request.title }}"'",
+            "PR_Link__c": "'"${{ github.event.pull_request.html_url }}"'",
+            "PR_Status__c": "'"$prStatus"'",
+            "PR_Author__c": "'"${{ github.event.pull_request.user.login }}"'",
+            "PR_Reviewer__c": "'"${{ github.event.review.user.login }}"'",
+            "PR_Check_Status__c": "'"${{ steps.fetch_checks.outputs.CHECK_STATUSES }}"'",
+            "PR_Check_Name__c": "'"${{ steps.fetch_checks.outputs.CHECK_NAMES }}"'",
+            "PR_Review_Comment__c": "'"$prComment"'"
+          }'
+
+          # Add merged user only if PR was merged
+          if [[ ! -z "$mergedBy" ]]; then
+            PAYLOAD=$(echo "$PAYLOAD" | jq --arg mergedBy "$mergedBy" '. + { "PR_Merged_By__c": $mergedBy }')
+          fi
+
+          echo "Sending payload to Salesforce: $PAYLOAD"
+
+          RESPONSE=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/ \
             -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d '{
-                "PR_Title__c": "'"${{ github.event.pull_request.title }}"'",
-                "PR_Link__c": "'"${{ github.event.pull_request.html_url }}"'",
-                "PR_Status__c": "'"$prStatus"'",
-                "PR_Review_Comment__c": "'"$prComment"'",
-                "PR_Author__c": "'"${{ github.event.pull_request.user.login }}"'",
-                "PR_Reviewer__c": "'"${{ github.event.review.user.login }}"'",
-                "PR_Check_Status__c": "'"${{ steps.process_checks.outputs.CHECK_STATUSES }}"'",
-                "PR_Check_Name__c": "'"${{ steps.process_checks.outputs.CHECK_NAMES }}"'"
-            }')
-          echo "Response: $plRequestObjectResponse"
+            -d "$PAYLOAD")
 
-  pr_merge:
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
-
-    steps:
-      - name: Capture Merged PR Details
-        id: pr_merge_check
-        run: |
-          echo "PR Merged"
-          echo "::set-output name=PR_STATUS::merged"
-          echo "::set-output name=MERGED_BY::${{ github.event.pull_request.merged_by.login }}"
-
-      - name: Send Merged PR Info to Salesforce
-        run: |
-          mergedBy="${{ steps.pr_merge_check.outputs.MERGED_BY }}"
-
-          plRequestObjectResponse=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/ \
-            -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-                "PR_Title__c": "'"${{ github.event.pull_request.title }}"'",
-                "PR_Link__c": "'"${{ github.event.pull_request.html_url }}"'",
-                "PR_Status__c": "Merged",
-                "PR_Author__c": "'"${{ github.event.pull_request.user.login }}"'",
-                "PR_Merged_By__c": "'"$mergedBy"'"
-            }')
-          echo "Response: $plRequestObjectResponse"
+          echo "Response: $RESPONSE"
