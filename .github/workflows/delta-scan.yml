@@ -96,7 +96,7 @@ jobs:
       - name: Upload Scanner Report
         id: upload-report
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: SFDX_Code_Scan_Report
           path: scanner-report.csv
@@ -110,7 +110,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Download Scanner Report
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: SFDX_Code_Scan_Report
 
