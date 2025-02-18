@@ -1,10 +1,10 @@
-name: PR Approval Workflow
+name: PR Approval & Merge Tracking
 
 on:
   pull_request_review:
     types: [submitted]
-  check_suite:
-    types: [completed]
+  pull_request:
+    types: [closed]  # Triggers when a PR is merged
 
 jobs:
   pr_approval:
@@ -40,19 +40,18 @@ jobs:
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved' || steps.pr_approval_check.outputs.PR_STATUS == 'rejected'
         id: process_checks
         run: |
-          # Filter only completed checks
           CHECK_NAMES=$(jq -r '.check_runs[] | select(.status == "completed") | .name' check_runs.json | paste -sd "," -)
           CHECK_STATUSES=$(jq -r '.check_runs[] | select(.status == "completed") | .conclusion' check_runs.json | paste -sd "," -)
           
           echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
           echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
 
-      - name: Send PR Information to Salesforce
+      - name: Send PR Information to Salesforce (Approval Case)
         if: steps.pr_approval_check.outputs.PR_STATUS == 'approved' || steps.pr_approval_check.outputs.PR_STATUS == 'rejected'
         run: |
           prStatus=${{ steps.pr_approval_check.outputs.PR_STATUS }}
           prComment="${{ github.event.review.body }}"
-          
+
           plRequestObjectResponse=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/ \
             -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json" \
@@ -67,4 +66,31 @@ jobs:
                 "PR_Check_Name__c": "'"${{ steps.process_checks.outputs.CHECK_NAMES }}"'"
             }')
           echo "Response: $plRequestObjectResponse"
-          
+
+  pr_merge:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+
+    steps:
+      - name: Capture Merged PR Details
+        id: pr_merge_check
+        run: |
+          echo "PR Merged"
+          echo "::set-output name=PR_STATUS::merged"
+          echo "::set-output name=MERGED_BY::${{ github.event.pull_request.merged_by.login }}"
+
+      - name: Send Merged PR Info to Salesforce
+        run: |
+          mergedBy="${{ steps.pr_merge_check.outputs.MERGED_BY }}"
+
+          plRequestObjectResponse=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/ \
+            -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+                "PR_Title__c": "'"${{ github.event.pull_request.title }}"'",
+                "PR_Link__c": "'"${{ github.event.pull_request.html_url }}"'",
+                "PR_Status__c": "Merged",
+                "PR_Author__c": "'"${{ github.event.pull_request.user.login }}"'",
+                "PR_Merged_By__c": "'"$mergedBy"'"
+            }')
+          echo "Response: $plRequestObjectResponse"
