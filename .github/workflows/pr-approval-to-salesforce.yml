@@ -16,7 +16,7 @@ jobs:
         run: |
           PR_STATUS="Pending"
           MERGED_BY=""
-          
+
           if [[ "${{ github.event.review.state }}" == "approved" ]]; then
             PR_STATUS="Approved"
           elif [[ "${{ github.event.review.state }}" == "changes_requested" ]]; then
@@ -28,7 +28,6 @@ jobs:
             MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
           fi
 
-          echo "Final PR Status: $PR_STATUS"
           echo "::set-output name=PR_STATUS::$PR_STATUS"
           echo "::set-output name=MERGED_BY::$MERGED_BY"
 
@@ -45,16 +44,38 @@ jobs:
           echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
           echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
 
-      - name: Send PR Information to Salesforce
+      - name: Check if PR Record Exists in Salesforce
+        id: check_existing_pr
+        run: |
+          PR_LINK="${{ github.event.pull_request.html_url }}"
+
+          RESPONSE=$(curl -s -X GET "https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/query/?q=SELECT+Id,PR_Status__c+FROM+Pull_Request__c+WHERE+PR_Link__c='${PR_LINK}'" \
+            -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+            -H "Content-Type: application/json")
+
+          RECORD_ID=$(echo "$RESPONSE" | jq -r '.records[0].Id // empty')
+          EXISTING_STATUS=$(echo "$RESPONSE" | jq -r '.records[0].PR_Status__c // empty')
+
+          if [[ -n "$RECORD_ID" ]]; then
+            echo "Existing PR Record Found: $RECORD_ID with status $EXISTING_STATUS"
+            echo "::set-output name=EXISTING_ID::$RECORD_ID"
+          else
+            echo "No existing PR record found"
+            echo "::set-output name=EXISTING_ID::"
+          fi
+
+      - name: Send PR Information to Salesforce (Create or Update)
         run: |
           prStatus="${{ steps.pr_status_check.outputs.PR_STATUS }}"
           mergedBy="${{ steps.pr_status_check.outputs.MERGED_BY }}"
           prComment="${{ github.event.review.body }}"
+          recordId="${{ steps.check_existing_pr.outputs.EXISTING_ID }}"
+          prLink="${{ github.event.pull_request.html_url }}"
 
-          # JSON payload with conditional fields
+          # Prepare JSON payload
           PAYLOAD='{
             "PR_Title__c": "'"${{ github.event.pull_request.title }}"'",
-            "PR_Link__c": "'"${{ github.event.pull_request.html_url }}"'",
+            "PR_Link__c": "'"$prLink"'",
             "PR_Status__c": "'"$prStatus"'",
             "PR_Author__c": "'"${{ github.event.pull_request.user.login }}"'",
             "PR_Reviewer__c": "'"${{ github.event.review.user.login }}"'",
@@ -63,16 +84,23 @@ jobs:
             "PR_Review_Comment__c": "'"$prComment"'"
           }'
 
-          # Add merged user only if PR was merged
-          if [[ ! -z "$mergedBy" ]]; then
+          # If merged, add PR_Merged_By__c
+          if [[ -n "$mergedBy" ]]; then
             PAYLOAD=$(echo "$PAYLOAD" | jq --arg mergedBy "$mergedBy" '. + { "PR_Merged_By__c": $mergedBy }')
           fi
 
-          echo "Sending payload to Salesforce: $PAYLOAD"
-
-          RESPONSE=$(curl -X POST https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/ \
-            -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d "$PAYLOAD")
+          if [[ -n "$recordId" ]]; then
+            echo "Updating existing PR record: $recordId"
+            RESPONSE=$(curl -X PATCH "https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/$recordId" \
+              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD")
+          else
+            echo "Creating a new PR record"
+            RESPONSE=$(curl -X POST "https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/" \
+              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD")
+          fi
 
           echo "Response: $RESPONSE"
