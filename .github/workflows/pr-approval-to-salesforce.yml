@@ -49,25 +49,16 @@ jobs:
         run: |
           PR_LINK="${{ github.event.pull_request.html_url }}"
 
-          RESPONSE=$(curl -s -X GET "https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/query/?q=SELECT+Id,PR_Status__c,PR_Reviewer__c,PR_Author__c,PR_Check_Status__c,PR_Check_Name__c,PR_Review_Comment__c+FROM+Pull_Request__c+WHERE+PR_Link__c='${PR_LINK}'" \
+          RESPONSE=$(curl -s -X GET "https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/query/?q=SELECT+Id,PR_Status__c+FROM+Pull_Request__c+WHERE+PR_Link__c='${PR_LINK}'" \
             -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json")
 
           RECORD_ID=$(echo "$RESPONSE" | jq -r '.records[0].Id // empty')
-          EXISTING_REVIEWER=$(echo "$RESPONSE" | jq -r '.records[0].PR_Reviewer__c // empty')
-          EXISTING_AUTHOR=$(echo "$RESPONSE" | jq -r '.records[0].PR_Author__c // empty')
-          EXISTING_CHECK_STATUS=$(echo "$RESPONSE" | jq -r '.records[0].PR_Check_Status__c // empty')
-          EXISTING_CHECK_NAME=$(echo "$RESPONSE" | jq -r '.records[0].PR_Check_Name__c // empty')
-          EXISTING_REVIEW_COMMENT=$(echo "$RESPONSE" | jq -r '.records[0].PR_Review_Comment__c // empty')
+          EXISTING_STATUS=$(echo "$RESPONSE" | jq -r '.records[0].PR_Status__c // empty')
 
           if [[ -n "$RECORD_ID" ]]; then
-            echo "Existing PR Record Found: $RECORD_ID"
+            echo "Existing PR Record Found: $RECORD_ID with status $EXISTING_STATUS"
             echo "::set-output name=EXISTING_ID::$RECORD_ID"
-            echo "::set-output name=EXISTING_REVIEWER::$EXISTING_REVIEWER"
-            echo "::set-output name=EXISTING_AUTHOR::$EXISTING_AUTHOR"
-            echo "::set-output name=EXISTING_CHECK_STATUS::$EXISTING_CHECK_STATUS"
-            echo "::set-output name=EXISTING_CHECK_NAME::$EXISTING_CHECK_NAME"
-            echo "::set-output name=EXISTING_REVIEW_COMMENT::$EXISTING_REVIEW_COMMENT"
           else
             echo "No existing PR record found"
             echo "::set-output name=EXISTING_ID::"
@@ -81,23 +72,16 @@ jobs:
           recordId="${{ steps.check_existing_pr.outputs.EXISTING_ID }}"
           prLink="${{ github.event.pull_request.html_url }}"
 
-          # Preserve previous data
-          existingReviewer="${{ steps.check_existing_pr.outputs.EXISTING_REVIEWER }}"
-          existingAuthor="${{ steps.check_existing_pr.outputs.EXISTING_AUTHOR }}"
-          existingCheckStatus="${{ steps.check_existing_pr.outputs.EXISTING_CHECK_STATUS }}"
-          existingCheckName="${{ steps.check_existing_pr.outputs.EXISTING_CHECK_NAME }}"
-          existingReviewComment="${{ steps.check_existing_pr.outputs.EXISTING_REVIEW_COMMENT }}"
-
           # Prepare JSON payload
           PAYLOAD='{
             "PR_Title__c": "'"${{ github.event.pull_request.title }}"'",
             "PR_Link__c": "'"$prLink"'",
             "PR_Status__c": "'"$prStatus"'",
-            "PR_Author__c": "'"$existingAuthor"'",
-            "PR_Reviewer__c": "'"$existingReviewer"'",
-            "PR_Check_Status__c": "'"$existingCheckStatus"'",
-            "PR_Check_Name__c": "'"$existingCheckName"'",
-            "PR_Review_Comment__c": "'"$existingReviewComment"'"
+            "PR_Author__c": "'"${{ github.event.pull_request.user.login }}"'",
+            "PR_Reviewer__c": "'"${{ github.event.review.user.login }}"'",
+            "PR_Check_Status__c": "'"${{ steps.fetch_checks.outputs.CHECK_STATUSES }}"'",
+            "PR_Check_Name__c": "'"${{ steps.fetch_checks.outputs.CHECK_NAMES }}"'",
+            "PR_Review_Comment__c": "'"$prComment"'"
           }'
 
           # If merged, add PR_Merged_By__c
