@@ -16,6 +16,7 @@ jobs:
         run: |
           PR_STATUS="Pending"
           MERGED_BY=""
+          MERGE_COMMENT=""
 
           if [[ "${{ github.event.review.state }}" == "approved" ]]; then
             PR_STATUS="Approved"
@@ -26,10 +27,12 @@ jobs:
           if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
             PR_STATUS="Merged"
             MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
+            MERGE_COMMENT="${{ github.event.pull_request.body }}" # Capturing PR merge commit message
           fi
 
           echo "::set-output name=PR_STATUS::$PR_STATUS"
           echo "::set-output name=MERGED_BY::$MERGED_BY"
+          echo "::set-output name=MERGE_COMMENT::$MERGE_COMMENT"
 
       - name: Fetch all check runs for the PR
         id: fetch_checks
@@ -49,50 +52,55 @@ jobs:
         run: |
           PR_LINK="${{ github.event.pull_request.html_url }}"
 
-          RESPONSE=$(curl -s -X GET "https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/query/?q=SELECT+Id,PR_Status__c,PR_Reviewer__c,PR_Review_Comment__c+FROM+Pull_Request__c+WHERE+PR_Link__c='${PR_LINK}'" \
+          RESPONSE=$(curl -s -X GET "https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/query/?q=SELECT+Id,PR_Status__c,PR_Reviewer__c,PR_Review_Comment__c,PR_Merged_Comment__c+FROM+Pull_Request__c+WHERE+PR_Link__c='${PR_LINK}'" \
             -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json")
 
           RECORD_ID=$(echo "$RESPONSE" | jq -r '.records[0].Id // empty')
-          EXISTING_STATUS=$(echo "$RESPONSE" | jq -r '.records[0].PR_Status__c // empty')
           EXISTING_REVIEWER=$(echo "$RESPONSE" | jq -r '.records[0].PR_Reviewer__c // empty')
           EXISTING_COMMENT=$(echo "$RESPONSE" | jq -r '.records[0].PR_Review_Comment__c // empty')
+          EXISTING_MERGE_COMMENT=$(echo "$RESPONSE" | jq -r '.records[0].PR_Merged_Comment__c // empty')
 
           if [[ -n "$RECORD_ID" ]]; then
             echo "Existing PR Record Found: $RECORD_ID"
             echo "::set-output name=EXISTING_ID::$RECORD_ID"
             echo "::set-output name=EXISTING_REVIEWER::$EXISTING_REVIEWER"
             echo "::set-output name=EXISTING_COMMENT::$EXISTING_COMMENT"
+            echo "::set-output name=EXISTING_MERGE_COMMENT::$EXISTING_MERGE_COMMENT"
           else
             echo "No existing PR record found"
             echo "::set-output name=EXISTING_ID::"
             echo "::set-output name=EXISTING_REVIEWER::"
             echo "::set-output name=EXISTING_COMMENT::"
+            echo "::set-output name=EXISTING_MERGE_COMMENT::"
           fi
 
       - name: Send PR Information to Salesforce (Create or Update)
         run: |
           prStatus="${{ steps.pr_status_check.outputs.PR_STATUS }}"
           mergedBy="${{ steps.pr_status_check.outputs.MERGED_BY }}"
+          mergeComment="${{ steps.pr_status_check.outputs.MERGE_COMMENT }}"
           newReviewer="${{ github.event.review.user.login }}"
           newComment="${{ github.event.review.body }}"
           existingReviewer="${{ steps.check_existing_pr.outputs.EXISTING_REVIEWER }}"
           existingComment="${{ steps.check_existing_pr.outputs.EXISTING_COMMENT }}"
+          existingMergeComment="${{ steps.check_existing_pr.outputs.EXISTING_MERGE_COMMENT }}"
           recordId="${{ steps.check_existing_pr.outputs.EXISTING_ID }}"
           prLink="${{ github.event.pull_request.html_url }}"
 
-          # Retain existing reviewers and append new ones if needed
+          # Append new reviewer to existing reviewers
           if [[ -n "$existingReviewer" && "$existingReviewer" != "null" ]]; then
-            updatedReviewer="$existingReviewer, $newReviewer"
-          else
-            updatedReviewer="$newReviewer"
+            updatedReviewer="$existingReviewer
           fi
 
-          # Retain existing review comments and append new ones if needed
+          # Append new review comment to existing comments
           if [[ -n "$existingComment" && "$existingComment" != "null" ]]; then
-            updatedComment="$existingComment | $newComment"
-          else
-            updatedComment="$newComment"
+            updatedComment="$existingComment
+          fi
+
+          # Append new merge comment to existing merge comments
+          if [[ -n "$existingMergeComment" && "$existingMergeComment" != "null" ]]; then
+            updatedMergeComment="$existingMergeComment
           fi
 
           # Prepare JSON payload
@@ -104,7 +112,8 @@ jobs:
             "PR_Reviewer__c": "'"$updatedReviewer"'",
             "PR_Check_Status__c": "'"${{ steps.fetch_checks.outputs.CHECK_STATUSES }}"'",
             "PR_Check_Name__c": "'"${{ steps.fetch_checks.outputs.CHECK_NAMES }}"'",
-            "PR_Review_Comment__c": "'"$updatedComment"'"
+            "PR_Review_Comment__c": "'"$updatedComment"'",
+            "PR_Merged_Comment__c": "'"$updatedMergeComment"'"
           }'
 
           # If merged, add PR_Merged_By__c
