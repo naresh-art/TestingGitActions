@@ -27,7 +27,7 @@ jobs:
           if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
             PR_STATUS="Merged"
             MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
-            MERGE_COMMENT="${{ github.event.pull_request.body }}" # Capturing PR merge commit message
+            MERGE_COMMENT="${{ github.event.pull_request.body }}"
           fi
 
           echo "::set-output name=PR_STATUS::$PR_STATUS"
@@ -62,13 +62,11 @@ jobs:
           EXISTING_MERGE_COMMENT=$(echo "$RESPONSE" | jq -r '.records[0].PR_Merged_Comment__c // empty')
 
           if [[ -n "$RECORD_ID" ]]; then
-            echo "Existing PR Record Found: $RECORD_ID"
             echo "::set-output name=EXISTING_ID::$RECORD_ID"
             echo "::set-output name=EXISTING_REVIEWER::$EXISTING_REVIEWER"
             echo "::set-output name=EXISTING_COMMENT::$EXISTING_COMMENT"
             echo "::set-output name=EXISTING_MERGE_COMMENT::$EXISTING_MERGE_COMMENT"
           else
-            echo "No existing PR record found"
             echo "::set-output name=EXISTING_ID::"
             echo "::set-output name=EXISTING_REVIEWER::"
             echo "::set-output name=EXISTING_COMMENT::"
@@ -88,33 +86,49 @@ jobs:
           recordId="${{ steps.check_existing_pr.outputs.EXISTING_ID }}"
           prLink="${{ github.event.pull_request.html_url }}"
 
+          # Escape JSON special characters
+          sanitize_json() {
+            echo "$1" | jq -Rs .
+          }
+
+          sanitizedReviewer=$(sanitize_json "$newReviewer")
+          sanitizedComment=$(sanitize_json "$newComment")
+          sanitizedMergeComment=$(sanitize_json "$mergeComment")
+          sanitizedExistingReviewer=$(sanitize_json "$existingReviewer")
+          sanitizedExistingComment=$(sanitize_json "$existingComment")
+          sanitizedExistingMergeComment=$(sanitize_json "$existingMergeComment")
+
           # Append new reviewer to existing reviewers
-          if [[ -n "$existingReviewer" && "$existingReviewer" != "null" ]]; then
-            updatedReviewer="$existingReviewer
-          fi
+          updatedReviewer=$(jq -n --arg old "$sanitizedExistingReviewer" --arg new "$sanitizedReviewer" '$old + ", " + $new')
 
           # Append new review comment to existing comments
-          if [[ -n "$existingComment" && "$existingComment" != "null" ]]; then
-            updatedComment="$existingComment
-          fi
+          updatedComment=$(jq -n --arg old "$sanitizedExistingComment" --arg new "$sanitizedComment" '$old + " | " + $new')
 
           # Append new merge comment to existing merge comments
-          if [[ -n "$existingMergeComment" && "$existingMergeComment" != "null" ]]; then
-            updatedMergeComment="$existingMergeComment
-          fi
+          updatedMergeComment=$(jq -n --arg old "$sanitizedExistingMergeComment" --arg new "$sanitizedMergeComment" '$old + " | " + $new')
 
           # Prepare JSON payload
-          PAYLOAD='{
-            "PR_Title__c": "'"${{ github.event.pull_request.title }}"'",
-            "PR_Link__c": "'"$prLink"'",
-            "PR_Status__c": "'"$prStatus"'",
-            "PR_Author__c": "'"${{ github.event.pull_request.user.login }}"'",
-            "PR_Reviewer__c": "'"$updatedReviewer"'",
-            "PR_Check_Status__c": "'"${{ steps.fetch_checks.outputs.CHECK_STATUSES }}"'",
-            "PR_Check_Name__c": "'"${{ steps.fetch_checks.outputs.CHECK_NAMES }}"'",
-            "PR_Review_Comment__c": "'"$updatedComment"'",
-            "PR_Merged_Comment__c": "'"$updatedMergeComment"'"
-          }'
+          PAYLOAD=$(jq -n \
+            --arg title "${{ github.event.pull_request.title }}" \
+            --arg link "$prLink" \
+            --arg status "$prStatus" \
+            --arg author "${{ github.event.pull_request.user.login }}" \
+            --arg reviewer "$updatedReviewer" \
+            --arg checkStatus "${{ steps.fetch_checks.outputs.CHECK_STATUSES }}" \
+            --arg checkName "${{ steps.fetch_checks.outputs.CHECK_NAMES }}" \
+            --arg reviewComment "$updatedComment" \
+            --arg mergedComment "$updatedMergeComment" \
+            '{ 
+              "PR_Title__c": $title, 
+              "PR_Link__c": $link, 
+              "PR_Status__c": $status, 
+              "PR_Author__c": $author, 
+              "PR_Reviewer__c": $reviewer, 
+              "PR_Check_Status__c": $checkStatus, 
+              "PR_Check_Name__c": $checkName, 
+              "PR_Review_Comment__c": $reviewComment, 
+              "PR_Merged_Comment__c": $mergedComment 
+            }')
 
           # If merged, add PR_Merged_By__c
           if [[ -n "$mergedBy" ]]; then
