@@ -83,12 +83,16 @@ jobs:
 
           # Retain existing reviewers and append new ones if needed
           if [[ -n "$existingReviewer" && "$existingReviewer" != "null" ]]; then
-            updatedReviewer="$existingReviewer
+            updatedReviewer="$existingReviewer $newReviewer"
+          else
+            updatedReviewer="$newReviewer"
           fi
 
           # Retain existing review comments and append new ones if needed
           if [[ -n "$existingComment" && "$existingComment" != "null" ]]; then
-            updatedComment="$existingComment
+            updatedComment="$existingComment  $newComment"
+          else
+            updatedComment="$newComment"
           fi
 
           # Prepare JSON payload
