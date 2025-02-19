@@ -14,7 +14,7 @@ public with sharing class DummyAccountClass {
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
-                    acc.Description = 'Happy PR Approval Automation Funday final Test1';
+                    acc.Description = 'Happy PR Approval Automation Funday final Test123';
                     acc.Rating = 'Hot';
                     acc.Industry = 'Agriculture';
                 }
