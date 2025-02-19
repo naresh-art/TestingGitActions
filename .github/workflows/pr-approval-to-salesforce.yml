@@ -10,6 +10,10 @@ jobs:
   pr_process:
     runs-on: ubuntu-latest
 
+    env:
+      DOMAIN_URL: ${{ secrets.SF_DOMAIN_URL }}
+      OBJECT_NAME: ${{ secrets.SF_OBJECT_NAME }}
+
     steps:
       - name: Determine PR Status
         id: pr_status_check
@@ -49,7 +53,7 @@ jobs:
         run: |
           PR_LINK="${{ github.event.pull_request.html_url }}"
 
-          RESPONSE=$(curl -s -X GET "https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/query/?q=SELECT+Id,PR_Status__c,PR_Reviewer__c,PR_Review_Comment__c+FROM+Pull_Request__c+WHERE+PR_Link__c='${PR_LINK}'" \
+          RESPONSE=$(curl -s -X GET "${{ env.DOMAIN_URL }}/services/data/v61.0/query/?q=SELECT+Id,PR_Status__c,PR_Reviewer__c,PR_Review_Comment__c+FROM+${{ env.OBJECT_NAME }}+WHERE+PR_Link__c='${PR_LINK}'" \
             -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json")
 
@@ -114,13 +118,13 @@ jobs:
 
           if [[ -n "$recordId" ]]; then
             echo "Updating existing PR record: $recordId"
-            RESPONSE=$(curl -X PATCH "https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/$recordId" \
+            RESPONSE=$(curl -X PATCH "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/$recordId" \
               -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
           else
             echo "Creating a new PR record"
-            RESPONSE=$(curl -X POST "https://individual-fc-dev-ed.develop.my.salesforce.com/services/data/v61.0/sobjects/Pull_Request__c/" \
+            RESPONSE=$(curl -X POST "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/" \
               -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
