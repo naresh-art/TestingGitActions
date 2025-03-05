@@ -117,8 +117,11 @@ jobs:
           # Get the list of changed files in the PR
           git diff --name-only HEAD^ HEAD > changed_files.txt
 
+          # Ensure filtered_files.txt is created
+          touch filtered_files.txt
+
           # Filter profile and permission set files
-          grep -E 'force-app/main/default/(profiles|permissionsets)/.*\.(profile|permissionset)-meta\.xml' changed_files.txt || echo "" > filtered_files.txt
+          grep -E 'force-app/main/default/(profiles|permissionsets)/.*\.(profile|permissionset)-meta\.xml' changed_files.txt > filtered_files.txt || echo "" > filtered_files.txt
 
       - name: Scan only changed Profiles and Permission Sets for Critical Permissions
         run: |
@@ -143,6 +146,12 @@ jobs:
           )
 
           BLOCKED_FILES=()
+
+          # Ensure filtered_files.txt exists before reading
+          if [ ! -f filtered_files.txt ]; then
+            echo "No profile or permission set files were modified."
+            exit 0
+          fi
 
           while IFS= read -r FILE; do
             [[ -z "$FILE" ]] && continue  # Skip empty lines
