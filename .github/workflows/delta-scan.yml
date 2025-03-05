@@ -104,17 +104,23 @@ jobs:
   quality-gate-critical-permissions-check:
     runs-on: ubuntu-latest
     needs: quality-gate-code-check
-    if: ${{ needs.quality-gate-code-check.outputs.block-pr == 'false' }}  # Only run this job if the code scan passes
+    if: ${{ needs.quality-gate-code-check.outputs.block-pr == 'false' }}  # Only run if the code scan passes
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
-      - name: Download Scanner Report
-        uses: actions/download-artifact@v4
         with:
-          name: SFDX_Code_Scan_Report
+          fetch-depth: 2  # Ensures we get the previous commit for comparison
 
-      - name: Scan Profiles and Permission Sets for Critical Permissions
+      - name: Get changed files
+        id: changed-files
+        run: |
+          # Get the list of changed files in the PR
+          git diff --name-only HEAD^ HEAD > changed_files.txt
+
+          # Filter profile and permission set files
+          grep -E 'force-app/main/default/(profiles|permissionsets)/.*\.(profile|permissionset)-meta\.xml' changed_files.txt || echo "" > filtered_files.txt
+
+      - name: Scan only changed Profiles and Permission Sets for Critical Permissions
         run: |
           CRITICAL_PERMISSIONS=(
               "AssignPermissionSets"
@@ -138,29 +144,22 @@ jobs:
 
           BLOCKED_FILES=()
 
-          for FILE in $(find force-app/main/default/profiles -name '*.profile-meta.xml'); do
+          while IFS= read -r FILE; do
+            [[ -z "$FILE" ]] && continue  # Skip empty lines
+
             for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
               if grep -q "$PERMISSION" "$FILE" && ! grep -q "System Administrator" "$FILE"; then
                 BLOCKED_FILES+=("$FILE")
               fi
             done
-          done
-
-          for FILE in $(find force-app/main/default/permissionsets -name '*.permissionset-meta.xml'); do
-            for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
-              if grep -q "$PERMISSION" "$FILE"; then
-                BLOCKED_FILES+=("$FILE")
-              fi
-            done
-          done
+          done < filtered_files.txt
 
           if [ ${#BLOCKED_FILES[@]} -gt 0 ]; then
-            echo "Critical permissions found in the following files:"
+            echo "Critical permissions found in the following modified files:"
             for FILE in "${BLOCKED_FILES[@]}"; do
               echo "$FILE"
             done
-            exit 1
+            exit 1  # Fail the job
           else
-            echo "No critical permissions assigned to non-System Administrator profiles or permission sets."
+            echo "No critical permissions found in modified files."
           fi
-          
