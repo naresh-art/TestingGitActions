@@ -3,7 +3,7 @@ name: Scheduler - Trigger Delta Scan Every 5 Minutes
 on:
   schedule:
     - cron: '*/5 * * * *'  # Every 5 minutes
-  workflow_dispatch:       # Optional: Allow manual testing of this scheduler
+  workflow_dispatch:
 
 jobs:
   trigger-delta-workflow:
@@ -14,5 +14,5 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          workflow: delta-scan.yml   # ✅ Must match the filename of your delta workflow
-          ref: main             # Or your default branch
+          workflow: Salesforce Code Scan and Critical Permissions Check on Pull Request  # ✅ use the workflow `name` not the filename
+          ref: main
