@@ -1,33 +1,27 @@
-name: Delta File Scan Every 5 Minute (GitHub allows ~5 mins)
+name: Delta Scan Every 5 Minutes
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Every 5 minutes (GitHub limitation)
-  workflow_dispatch:       # Allow manual trigger
+    - cron: '*/5 * * * *'     # Runs every 5 minutes (UTC time)
+  workflow_dispatch:          # Allows manual runs if needed
 
 jobs:
-  delta-scan:
+  run-delta-scan:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Repo
         uses: actions/checkout@v3
 
-      - name: Set up Node.js (optional, if you're using Node)
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-
-      - name: Run Delta File Scan Script
+      - name: Run Delta File Script
         run: |
-          echo "Running delta scan..."
-          # Replace below line with your actual delta file generator script
-          bash ./scripts/generate-delta.sh
+          echo "Generating delta file..."
+          bash ./scripts/generate-delta.sh  # Replace with your real script
 
-      - name: Commit Delta File
+      - name: Commit and Push Delta File
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Update delta file [skip ci]" || echo "No changes to commit"
+          git commit -m "Auto-update delta file [skip ci]" || echo "No changes"
           git push
