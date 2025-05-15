@@ -1,16 +1,18 @@
-name: Auto Run Every 5 Minutes
+name: Scheduler - Trigger Delta Scan Every 5 Minutes
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Runs every 5 minutes
-  workflow_dispatch:       # Allows manual triggering as well
+    - cron: '*/5 * * * *'  # Every 5 minutes
+  workflow_dispatch:       # Optional: Allow manual testing of this scheduler
 
 jobs:
-  run-every-5-mins:
+  trigger-delta-workflow:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Print time
-        run: echo "Running workflow at $(date)"
+      - name: Trigger Delta Workflow
+        uses: peter-evans/workflow-dispatch@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          workflow: delta-scan.yml   # ✅ Must match the filename of your delta workflow
+          ref: main             # Or your default branch
