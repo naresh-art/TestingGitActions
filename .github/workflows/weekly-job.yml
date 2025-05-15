@@ -1,0 +1,16 @@
+name: Weekly Scheduled Job
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'  # Every Monday at 05:00 UTC
+
+jobs:
+  weekly-task:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Run Custom Script
+        run: echo "This is a weekly scheduled job running every Monday!"
