@@ -10,9 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Delta Workflow
-        uses: peter-evans/workflow-dispatch@v1
+        uses: peter-evans/workflow-dispatch@v2  # Change to v2 for better compatibility
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          workflow: Salesforce Code Scan and Critical Permissions Check on Pull Request  # ✅ use the workflow `name` not the filename
+          workflow: Salesforce Code Scan and Critical Permissions Check on Pull Request  # Use the workflow name, not filename
           ref: main
