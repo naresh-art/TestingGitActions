@@ -49,7 +49,7 @@ public with sharing class AccountInsertClass {
                 // System.debug('Test 1 seviorityyy test Test data 1234567891');
             }
         } else {
-            throw new CustomException('You do not have permission to create Opportunity records Data.');
+            throw new CustomException('You do not have permission to create Opportunity records Data1.');
         }
     }
     /**
