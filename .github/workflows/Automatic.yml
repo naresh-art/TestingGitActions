@@ -2,7 +2,7 @@ name: Salesforce Code Scan and Critical Permission Check - Scheduled
 
 on:
   schedule:
-    - cron: '0 12 * * 5'  # Every Friday 5:30 PM IST (12:00 PM UTC)
+    - cron: '0 12 * * 6'  # Every Friday 5:30 PM IST (12:00 PM UTC)
   workflow_dispatch:        # Optional: allows manual triggering
 
 jobs:
