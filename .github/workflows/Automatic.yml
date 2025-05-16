@@ -1,18 +1,125 @@
-name: Scheduler - Trigger Delta Scan Every 5 Minutes
+name: Salesforce Code Scan and Critical Permission Check - Scheduled
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Every 5 minutes
-  workflow_dispatch:
+    - cron: '*/10 * * * *'  # Runs every 10 minutes
+  workflow_dispatch:        # Optional: allows manual triggering
 
 jobs:
-  trigger-delta-workflow:
+  quality-gate-code-check:
     runs-on: ubuntu-latest
+    outputs:
+      scanner-report-path: ${{ steps.upload-report.outputs.artifact-path }}
+      block-pr: ${{ steps.block-check.outputs.block-status }}
     steps:
-      - name: Trigger Delta Workflow
-        uses: peter-evans/workflow-dispatch@v2  # Change to v2 for better compatibility
+      - uses: actions/checkout@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          workflow: Salesforce Code Scan and Critical Permissions Check on Pull Request  # Use the workflow name, not filename
-          ref: main
+          fetch-depth: 0
+
+      - name: Use Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20.x
+
+      - name: Install Salesforce CLI
+        run: npm install @salesforce/cli --global
+
+      - name: Install Scanner Plugin
+        run: sf plugins install @salesforce/sfdx-scanner
+
+      - name: Verify CLI & Plugin
+        run: |
+          sf --version
+          sf plugins --core
+
+      - name: Run SFDX Scanner on all force-app files
+        id: run-scanner
+        run: |
+          echo "Running scanner on force-app/main/default/"
+          mkdir -p scanner
+          rm -f scanner/scanner-report.csv
+
+          sf scanner:run --target "force-app/main/default/" --format csv --outfile scanner/scanner-report.csv || {
+            echo "Scanner run failed"; exit 1;
+          }
+
+      - name: Block PR merge if severity 3 violations are found
+        id: block-check
+        run: |
+          if [ -f scanner/scanner-report.csv ]; then
+            echo "Processing scanner report..."
+            severity_fail_count=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner/scanner-report.csv)
+            echo "Severity 3 issues count: $severity_fail_count"
+            if [ "$severity_fail_count" -gt 0 ]; then
+              echo "Blocking due to severity 3 issues."
+              echo "::set-output name=block-status::true"
+              exit 1
+            else
+              echo "No critical issues."
+              echo "::set-output name=block-status::false"
+            fi
+          else
+            echo "Report missing"
+            exit 1
+          fi
+
+      - name: Upload Scanner Report
+        id: upload-report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Full_SFDX_Code_Scan_Report
+          path: scanner/scanner-report.csv
+
+  quality-gate-critical-permissions-check:
+    runs-on: ubuntu-latest
+    needs: quality-gate-code-check
+    if: ${{ needs.quality-gate-code-check.outputs.block-pr == 'false' }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Find all profile & permission set files
+        id: find-permission-files
+        run: |
+          mkdir -p temp
+          find force-app/main/default/profiles -name "*.profile-meta.xml" > temp/filtered_files.txt 2>/dev/null || true
+          find force-app/main/default/permissionsets -name "*.permissionset-meta.xml" >> temp/filtered_files.txt 2>/dev/null || true
+
+      - name: Scan for Critical Permissions
+        run: |
+          CRITICAL_PERMISSIONS=(
+              "AssignPermissionSets" "AuthorApex" "CustomizeApplication" "FreezeUsers"
+              "ManageEncryptionKeys" "ManageInternalUsers" "ManagePasswordPolicies"
+              "ManageProfilesPermissionSets" "ManageRoles" "ManageSharing" "ManageUsers"
+              "ModifyAllData" "MonitorLoginHistory" "MultiFactorAuthenticationRequired"
+              "PasswordNeverExpires" "ResetPasswordsUnlockUsers" "ViewAllData"
+          )
+
+          BLOCKED_FILES=()
+
+          if [ ! -f temp/filtered_files.txt ]; then
+            echo "No permission-related files found."
+            exit 0
+          fi
+
+          while IFS= read -r FILE; do
+            [[ -z "$FILE" ]] && continue
+
+            for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
+              if grep -q "$PERMISSION" "$FILE" && ! grep -q "System Administrator" "$FILE"; then
+                BLOCKED_FILES+=("$FILE")
+              fi
+            done
+          done < temp/filtered_files.txt
+
+          if [ ${#BLOCKED_FILES[@]} -gt 0 ]; then
+            echo "Blocked due to critical permissions in:"
+            for FILE in "${BLOCKED_FILES[@]}"; do
+              echo "$FILE"
+            done
+            exit 1
+          else
+            echo "No critical permissions found."
+          fi
