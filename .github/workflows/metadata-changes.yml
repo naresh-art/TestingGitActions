@@ -1,0 +1,68 @@
+name: Log Metadata Changes
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  detect-and-send:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Detect Metadata Changes
+        id: detect
+        run: |
+          echo "[" > changes.json
+
+          git diff --name-status HEAD~1 HEAD | grep -E 'src/.*' | while read status path; do
+            metaType=$(echo $path | cut -d'/' -f2)
+            name=$(basename "$path" | sed 's/\..*//')
+            fullName=$(echo "$path" | sed 's|src/||' | sed 's|/|.|g' | sed 's|\..*||')
+
+            statusLabel=""
+            if [[ "$status" == "A" ]]; then
+              statusLabel="Added"
+            elif [[ "$status" == "M" ]]; then
+              statusLabel="Updated"
+            elif [[ "$status" == "D" ]]; then
+              statusLabel="Deleted"
+            else
+              statusLabel="Changed"
+            fi
+
+            echo "  {" >> changes.json
+            echo "    \"Component_Name__c\": \"$name\"," >> changes.json
+            echo "    \"Full_Name__c\": \"$fullName\"," >> changes.json
+            echo "    \"Metadata_Type__c\": \"$metaType\"," >> changes.json
+            echo "    \"Change_Status__c\": \"$statusLabel\"," >> changes.json
+            echo "    \"Release_Tag__c\": \"v1.3.0\"" >> changes.json
+            echo "  }," >> changes.json
+          done
+
+          # Remove trailing comma
+          sed -i '$ s/,$//' changes.json
+          echo "]" >> changes.json
+          cat changes.json
+
+      - name: Upload JSON as artifact (for verification)
+        uses: actions/upload-artifact@v3
+        with:
+          name: metadata-changes
+          path: changes.json
+
+      - name: Send Changes to Salesforce
+        run: |
+          curl --request POST \
+            --url "https://naresh2025-dev-ed.develop.my.salesforce.com/services/apexrest/metadataChanges" \
+            --header "Authorization: Bearer ${{ secrets.SALESFORCE_TOKEN }}" \
+            --header "Content-Type: application/json" \
+            --data @changes.json
