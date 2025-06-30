@@ -14,7 +14,7 @@ public with sharing class AccountInsertClass {
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
-                    acc.Description = 'Happy PR Approved';
+                    acc.Description = 'Happy PR Approved By ME';
                     acc.Rating = 'Hot';
                     acc.Industry = 'Agriculture';
                 }
@@ -49,7 +49,7 @@ public with sharing class AccountInsertClass {
                 // System.debug('Test 1 seviorityyy test Test data 1234567891');
             }
         } else {
-            throw new CustomException('You do not have permission to create Opportunity records.');
+            throw new CustomException('You do not have permission to create Opportunity records Data1.');
         }
     }
     /**
@@ -63,7 +63,7 @@ public with sharing class AccountInsertClass {
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
-                    acc.Description = 'Happy Welcome Account Checks Funday final Test1234';
+                    acc.Description = 'Happy Welcome Account Checks Funday final Test Data';
                 }
             }
             insert accList;
