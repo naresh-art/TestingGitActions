@@ -14,7 +14,7 @@ public with sharing class AccountInsertClass {
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
-                    acc.Description = 'Happy PR Approved By Naresh';
+                    acc.Description = 'Happy PR Approved By Me';
                     acc.Rating = 'Hot';
                     acc.Industry = 'Agriculture';
                 }
