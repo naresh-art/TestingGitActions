@@ -4,7 +4,7 @@ on:
   pull_request_review:
     types: [submitted]
   pull_request:
-    types: [closed] # runs when PR is merged/closed
+    types: [closed]  # Triggers when a PR is merged
 
 jobs:
   pr_process:
@@ -13,232 +13,121 @@ jobs:
     env:
       DOMAIN_URL: ${{ secrets.SF_DOMAIN_URL }}
       OBJECT_NAME: ${{ secrets.SF_OBJECT_NAME }}
-      # Put only the branch protection required checks here (comma-separated)
-      REQUIRED_CHECKS: ${{ vars.REQUIRED_CHECKS }}
 
     steps:
-      # ------------------------------------------------------------
-      # 1) Authenticate with Salesforce (you must have this)
-      # ------------------------------------------------------------
-      - name: Authenticate with Salesforce
-        id: sf-auth
-        run: |
-          set -e
-          response=$(curl -s -X POST "https://login.salesforce.com/services/oauth2/token" \
-            -d "grant_type=password" \
-            -d "client_id=${{ secrets.SF_CLIENT_ID }}" \
-            -d "client_secret=${{ secrets.SF_CLIENT_SECRET }}" \
-            -d "username=${{ secrets.SF_USERNAME }}" \
-            -d "password=${{ secrets.SF_PASSWORD }}${{ secrets.SF_SECURITY_TOKEN }}" )
-
-          SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token // empty')
-
-          if [ -z "$SF_ACCESS_TOKEN" ]; then
-            echo "Salesforce authentication failed. Full response:"
-            echo "$response"
-            exit 1
-          fi
-
-          echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
-          echo "Authenticated to Salesforce."
-
-      # ------------------------------------------------------------
-      # 2) Determine PR Status (Approved/Changes Requested/Merged)
-      # ------------------------------------------------------------
       - name: Determine PR Status
         id: pr_status_check
         run: |
-          set -e
           PR_STATUS="Pending"
           MERGED_BY=""
 
-          # review event has github.event.review, but closed event doesn't
-          REVIEW_STATE="${{ github.event.review.state || '' }}"
-
-          if [[ "$REVIEW_STATE" == "approved" ]]; then
+          if [[ "${{ github.event.review.state }}" == "approved" ]]; then
             PR_STATUS="Approved"
-          elif [[ "$REVIEW_STATE" == "changes_requested" ]]; then
+          elif [[ "${{ github.event.review.state }}" == "changes_requested" ]]; then
             PR_STATUS="Changes Requested"
           fi
 
-          # closed event has merged flag
-          if [[ "${{ github.event.pull_request.merged || 'false' }}" == "true" ]]; then
+          if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
             PR_STATUS="Merged"
             MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
           fi
 
-          echo "PR_STATUS=$PR_STATUS" >> $GITHUB_OUTPUT
-          echo "MERGED_BY=$MERGED_BY" >> $GITHUB_OUTPUT
+          echo "::set-output name=PR_STATUS::$PR_STATUS"
+          echo "::set-output name=MERGED_BY::$MERGED_BY"
 
-      # ------------------------------------------------------------
-      # 3) Fetch ONLY REQUIRED checks (from branch protection ruleset)
-      # ------------------------------------------------------------
-      - name: Fetch REQUIRED check runs for the PR
-        id: fetch_required_checks
+      - name: Fetch all check runs for the PR
+        id: fetch_checks
         run: |
-          set -e
+          CHECK_RUNS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs)
 
-          if [[ -z "${REQUIRED_CHECKS}" ]]; then
-            echo "REQUIRED_CHECKS repo variable is empty."
-            echo "Set Settings → Actions → Variables → REQUIRED_CHECKS (comma-separated required check names)."
-            exit 1
-          fi
+          CHECK_NAMES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | .name' | paste -sd "," -)
+          CHECK_STATUSES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | .conclusion' | paste -sd "," -)
 
-          SHA="${{ github.event.pull_request.head.sha }}"
-          REPO="${{ github.repository }}"
+          echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
+          echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
 
-          # Get all check-runs for the SHA (we will FILTER them)
-          CHECK_RUNS=$(curl -s \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/commits/${SHA}/check-runs")
-
-          # Build output lists for ONLY required checks (latest run per check name)
-          IFS=',' read -ra REQ <<< "${REQUIRED_CHECKS}"
-
-          NAMES=""
-          STATUSES=""
-
-          for raw in "${REQ[@]}"; do
-            name=$(echo "$raw" | xargs) # trim spaces
-
-            # pick the latest check-run for this name
-            # conclusion can be: success, failure, cancelled, skipped, neutral, timed_out, action_required, stale, etc.
-            # if not completed, use status (queued/in_progress)
-            row=$(echo "$CHECK_RUNS" | jq -r --arg n "$name" '
-              [.check_runs[] | select(.name==$n)]
-              | sort_by(.started_at // .created_at)
-              | last
-              | if . == null then "" else
-                  ( .name + "|" + (if .status != "completed" then .status else (.conclusion // "completed") end) )
-                end
-            ')
-
-            if [[ -z "$row" ]]; then
-              # If the check is required but not found on this SHA yet
-              status="missing"
-            else
-              status="${row#*|}"
-            fi
-
-            if [[ -z "$NAMES" ]]; then
-              NAMES="$name"
-              STATUSES="$status"
-            else
-              NAMES="$NAMES,$name"
-              STATUSES="$STATUSES,$status"
-            fi
-          done
-
-          echo "CHECK_NAMES=$NAMES" >> $GITHUB_OUTPUT
-          echo "CHECK_STATUSES=$STATUSES" >> $GITHUB_OUTPUT
-
-          echo "Filtered Required Checks:"
-          echo "$NAMES"
-          echo "$STATUSES"
-
-      # ------------------------------------------------------------
-      # 4) Check if PR record exists in Salesforce
-      # ------------------------------------------------------------
       - name: Check if PR Record Exists in Salesforce
         id: check_existing_pr
         run: |
-          set -e
           PR_LINK="${{ github.event.pull_request.html_url }}"
 
-          RESPONSE=$(curl -s -X GET \
-            "${{ env.DOMAIN_URL }}/services/data/v61.0/query/?q=SELECT+Id,PR_Status__c,PR_Reviewer__c,PR_Review_Comment__c+FROM+${{ env.OBJECT_NAME }}+WHERE+PR_Link__c='${PR_LINK}'" \
-            -H "Authorization: Bearer $SF_ACCESS_TOKEN" \
+          RESPONSE=$(curl -s -X GET "${{ env.DOMAIN_URL }}/services/data/v61.0/query/?q=SELECT+Id,PR_Status__c,PR_Reviewer__c,PR_Review_Comment__c+FROM+${{ env.OBJECT_NAME }}+WHERE+PR_Link__c='${PR_LINK}'" \
+            -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json")
 
           RECORD_ID=$(echo "$RESPONSE" | jq -r '.records[0].Id // empty')
+          EXISTING_STATUS=$(echo "$RESPONSE" | jq -r '.records[0].PR_Status__c // empty')
           EXISTING_REVIEWER=$(echo "$RESPONSE" | jq -r '.records[0].PR_Reviewer__c // empty')
           EXISTING_COMMENT=$(echo "$RESPONSE" | jq -r '.records[0].PR_Review_Comment__c // empty')
 
-          echo "EXISTING_ID=$RECORD_ID" >> $GITHUB_OUTPUT
-          echo "EXISTING_REVIEWER=$EXISTING_REVIEWER" >> $GITHUB_OUTPUT
-          echo "EXISTING_COMMENT=$EXISTING_COMMENT" >> $GITHUB_OUTPUT
+          if [[ -n "$RECORD_ID" ]]; then
+            echo "Existing PR Record Found: $RECORD_ID"
+            echo "::set-output name=EXISTING_ID::$RECORD_ID"
+            echo "::set-output name=EXISTING_REVIEWER::$EXISTING_REVIEWER"
+            echo "::set-output name=EXISTING_COMMENT::$EXISTING_COMMENT"
+          else
+            echo "No existing PR record found"
+            echo "::set-output name=EXISTING_ID::"
+            echo "::set-output name=EXISTING_REVIEWER::"
+            echo "::set-output name=EXISTING_COMMENT::"
+          fi
 
-      # ------------------------------------------------------------
-      # 5) Create / Update Salesforce record with ONLY REQUIRED checks
-      # ------------------------------------------------------------
       - name: Send PR Information to Salesforce (Create or Update)
         run: |
-          set -e
-
           prStatus="${{ steps.pr_status_check.outputs.PR_STATUS }}"
           mergedBy="${{ steps.pr_status_check.outputs.MERGED_BY }}"
+          newReviewer="${{ github.event.review.user.login }}"
+          newComment="${{ github.event.review.body }}"
+          existingReviewer="${{ steps.check_existing_pr.outputs.EXISTING_REVIEWER }}"
+          existingComment="${{ steps.check_existing_pr.outputs.EXISTING_COMMENT }}"
           recordId="${{ steps.check_existing_pr.outputs.EXISTING_ID }}"
           prLink="${{ github.event.pull_request.html_url }}"
 
-          # review event values may be empty on pull_request closed
-          newReviewer="${{ github.event.review.user.login || '' }}"
-          newComment="${{ github.event.review.body || '' }}"
-
-          existingReviewer="${{ steps.check_existing_pr.outputs.EXISTING_REVIEWER }}"
-          existingComment="${{ steps.check_existing_pr.outputs.EXISTING_COMMENT }}"
-
-          # Append reviewer/comment safely
-          if [[ -n "$newReviewer" ]]; then
-            if [[ -n "$existingReviewer" && "$existingReviewer" != "null" ]]; then
-              updatedReviewer="$existingReviewer $newReviewer"
-            else
-              updatedReviewer="$newReviewer"
-            fi
+          # Retain existing reviewers and append new ones if needed
+          if [[ -n "$existingReviewer" && "$existingReviewer" != "null" ]]; then
+            updatedReviewer="$existingReviewer $newReviewer"
           else
-            updatedReviewer="$existingReviewer"
+            updatedReviewer="$newReviewer"
           fi
 
-          if [[ -n "$newComment" ]]; then
-            if [[ -n "$existingComment" && "$existingComment" != "null" ]]; then
-              updatedComment="$existingComment  $newComment"
-            else
-              updatedComment="$newComment"
-            fi
+          # Retain existing review comments and append new ones if needed
+          if [[ -n "$existingComment" && "$existingComment" != "null" ]]; then
+            updatedComment="$existingComment  $newComment"
           else
-            updatedComment="$existingComment"
+            updatedComment="$newComment"
           fi
 
-          # Build payload (ONLY required checks)
-          PAYLOAD=$(jq -n \
-            --arg title "${{ github.event.pull_request.title }}" \
-            --arg link "$prLink" \
-            --arg status "$prStatus" \
-            --arg author "${{ github.event.pull_request.user.login }}" \
-            --arg reviewer "$updatedReviewer" \
-            --arg comment "$updatedComment" \
-            --arg checkNames "${{ steps.fetch_required_checks.outputs.CHECK_NAMES }}" \
-            --arg checkStatuses "${{ steps.fetch_required_checks.outputs.CHECK_STATUSES }}" \
-            '{
-              PR_Title__c: $title,
-              PR_Link__c: $link,
-              PR_Status__c: $status,
-              PR_Author__c: $author,
-              PR_Reviewer__c: $reviewer,
-              PR_Check_Name__c: $checkNames,
-              PR_Check_Status__c: $checkStatuses,
-              PR_Review_Comment__c: $comment
-            }')
+          # Prepare JSON payload
+          PAYLOAD='{
+            "PR_Title__c": "'"${{ github.event.pull_request.title }}"'",
+            "PR_Link__c": "'"$prLink"'",
+            "PR_Status__c": "'"$prStatus"'",
+            "PR_Author__c": "'"${{ github.event.pull_request.user.login }}"'",
+            "PR_Reviewer__c": "'"$updatedReviewer"'",
+            "PR_Check_Status__c": "'"${{ steps.fetch_checks.outputs.CHECK_STATUSES }}"'",
+            "PR_Check_Name__c": "'"${{ steps.fetch_checks.outputs.CHECK_NAMES }}"'",
+            "PR_Review_Comment__c": "'"$updatedComment"'"
+          }'
 
+          # If merged, add PR_Merged_By__c
           if [[ -n "$mergedBy" ]]; then
-            PAYLOAD=$(echo "$PAYLOAD" | jq --arg mb "$mergedBy" '. + { PR_Merged_By__c: $mb }')
+            PAYLOAD=$(echo "$PAYLOAD" | jq --arg mergedBy "$mergedBy" '. + { "PR_Merged_By__c": $mergedBy }')
           fi
 
           if [[ -n "$recordId" ]]; then
             echo "Updating existing PR record: $recordId"
-            RESPONSE=$(curl -s -X PATCH \
-              "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/$recordId" \
-              -H "Authorization: Bearer $SF_ACCESS_TOKEN" \
+            RESPONSE=$(curl -X PATCH "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/$recordId" \
+              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
           else
             echo "Creating a new PR record"
-            RESPONSE=$(curl -s -X POST \
-              "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/" \
-              -H "Authorization: Bearer $SF_ACCESS_TOKEN" \
+            RESPONSE=$(curl -X POST "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/" \
+              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
           fi
 
-          echo "Salesforce Response:"
-          echo "$RESPONSE"
+          echo "Response: $RESPONSE"
