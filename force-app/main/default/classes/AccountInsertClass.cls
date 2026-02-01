@@ -5,7 +5,7 @@
 public with sharing class AccountInsertClass {
     /**
      * @description Inserts a list of Account records and updates their description.
-     * Performs CRUD and FLS validation before insertion.
+     * Performs CRUD and FLS validation before insertion.data
      *
      * @param accList The list of Account records to be inserted.
      * @throws CustomException If the user lacks permission to insert accounts.
@@ -14,12 +14,13 @@ public with sharing class AccountInsertClass {
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
-                    acc.Description = 'Happy';
+                    acc.Description = 'Happy PR Approved By Naresh';
                     acc.Rating = 'Hot';
                     acc.Industry = 'Agriculture';
                 }
             }
             insert accList;
+            // System.debug('Test 1 seviorityyy test Test data 1234566778');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
@@ -45,9 +46,10 @@ public with sharing class AccountInsertClass {
             }
             if(oppList.size() > 0){
                 insert oppList;
+                // System.debug('Test 1 seviorityyy test Test data 1234567891');
             }
         } else {
-            throw new CustomException('You do not have permission to create Opportunity records.');
+            throw new CustomException('You do not have permission to create Opportunity records Data1.');
         }
     }
     /**
@@ -61,10 +63,11 @@ public with sharing class AccountInsertClass {
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
-                    acc.Description = 'Happy Welcome Account Description';
+                    acc.Description = 'Happy Welcome Account Checks Funday final Test Data';
                 }
             }
             insert accList;
+            //System.debug('Test 1 seviorityyy test Test data testing days');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
