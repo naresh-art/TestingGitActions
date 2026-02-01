@@ -8,7 +8,7 @@ public with sharing class DummyAccountClass {
      * Performs CRUD and FLS validation before insertion.
      *
      * @param accList The list of Account records to be inserted.
-     * @throws CustomException If the user lacks permission to insert accounts.
+     * @throws CustomException If the user lacks permission to insert accounts data.
      */
     public static void insertAccount(List<Account> accList){
         if(Schema.sObjectType.Account.isCreateable()){
