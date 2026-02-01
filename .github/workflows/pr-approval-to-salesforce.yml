@@ -4,7 +4,7 @@ on:
   pull_request_review:
     types: [submitted]
   pull_request:
-    types: [closed]  # Triggers when a PR is merged
+    types: [closed]
 
 jobs:
   pr_process:
@@ -17,6 +17,7 @@ jobs:
     steps:
       - name: Determine PR Status
         id: pr_status_check
+        shell: bash
         run: |
           PR_STATUS="Pending"
           MERGED_BY=""
@@ -32,65 +33,68 @@ jobs:
             MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
           fi
 
-          echo "::set-output name=PR_STATUS::$PR_STATUS"
-          echo "::set-output name=MERGED_BY::$MERGED_BY"
+          echo "PR_STATUS=$PR_STATUS" >> "$GITHUB_OUTPUT"
+          echo "MERGED_BY=$MERGED_BY" >> "$GITHUB_OUTPUT"
 
       - name: Fetch all check runs for the PR
         id: fetch_checks
+        shell: bash
         run: |
           CHECK_RUNS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs)
+            "https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs")
 
           CHECK_NAMES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | .name' | paste -sd "," -)
           CHECK_STATUSES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | .conclusion' | paste -sd "," -)
 
-          echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
-          echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
+          echo "CHECK_NAMES=$CHECK_NAMES" >> "$GITHUB_OUTPUT"
+          echo "CHECK_STATUSES=$CHECK_STATUSES" >> "$GITHUB_OUTPUT"
 
-            - name: Check if PR Record Exists in Salesforce
+      - name: Check if PR Record Exists in Salesforce
         id: check_existing_pr
         shell: bash
         run: |
-          set -e
-
           PR_LINK="${{ github.event.pull_request.html_url }}"
+          # escape single quotes for SOQL string literal safety
+          PR_LINK_ESCAPED=${PR_LINK//\'/\\\'}
 
-          # Build SOQL and let curl URL-encode it safely
-          SOQL="SELECT Id,PR_Status__c,PR_Reviewer__c,PR_Review_Comment__c FROM ${{ env.OBJECT_NAME }} WHERE PR_Link__c = '${PR_LINK}'"
+          SOQL="SELECT Id, PR_Status__c, PR_Reviewer__c, PR_Review_Comment__c FROM ${{ env.OBJECT_NAME }} WHERE PR_Link__c='${PR_LINK_ESCAPED}'"
 
-          RESPONSE=$(curl -sS --get \
-            "${{ env.DOMAIN_URL }}/services/data/v61.0/query" \
+          # Call SF query endpoint with proper URL encoding
+          RESPONSE=$(curl -sS -G "${{ env.DOMAIN_URL }}/services/data/v61.0/query" \
             -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json" \
-            --data-urlencode "q=$SOQL")
+            --data-urlencode "q=${SOQL}")
 
-          echo "Salesforce query response: $RESPONSE"
+          echo "Raw SF Response: $RESPONSE"
 
-          # If Salesforce returns an error array, stop with a clear message
-          if echo "$RESPONSE" | jq -e 'type=="array" and .[0].errorCode' >/dev/null 2>&1; then
-            echo "Salesforce API error:"
+          # If SF returned an error array, fail early with readable output
+          RESP_TYPE=$(echo "$RESPONSE" | jq -r 'type' 2>/dev/null || echo "invalid")
+          if [[ "$RESP_TYPE" == "array" ]]; then
+            echo "Salesforce query failed (error array returned):"
             echo "$RESPONSE" | jq .
             exit 1
           fi
 
+          # Normal query response
           RECORD_ID=$(echo "$RESPONSE" | jq -r '.records[0].Id // empty')
-          EXISTING_REVIEWER=$(echo "$RESPONSE" | jq -r '.records[0].PR_Reviewer__c // empty ""')
-          EXISTING_COMMENT=$(echo "$RESPONSE" | jq -r '.records[0].PR_Review_Comment__c // ""')
-
-          {
-            echo "EXISTING_ID=$RECORD_ID"
-            echo "EXISTING_REVIEWER=$EXISTING_REVIEWER"
-            echo "EXISTING_COMMENT=$EXISTING_COMMENT"
-          } >> "$GITHUB_OUTPUT"
+          EXISTING_REVIEWER=$(echo "$RESPONSE" | jq -r '.records[0].PR_Reviewer__c // empty')
+          EXISTING_COMMENT=$(echo "$RESPONSE" | jq -r '.records[0].PR_Review_Comment__c // empty')
 
           if [[ -n "$RECORD_ID" ]]; then
             echo "Existing PR Record Found: $RECORD_ID"
+            echo "EXISTING_ID=$RECORD_ID" >> "$GITHUB_OUTPUT"
+            echo "EXISTING_REVIEWER=$EXISTING_REVIEWER" >> "$GITHUB_OUTPUT"
+            echo "EXISTING_COMMENT=$EXISTING_COMMENT" >> "$GITHUB_OUTPUT"
           else
             echo "No existing PR record found"
+            echo "EXISTING_ID=" >> "$GITHUB_OUTPUT"
+            echo "EXISTING_REVIEWER=" >> "$GITHUB_OUTPUT"
+            echo "EXISTING_COMMENT=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Send PR Information to Salesforce (Create or Update)
+        shell: bash
         run: |
           prStatus="${{ steps.pr_status_check.outputs.PR_STATUS }}"
           mergedBy="${{ steps.pr_status_check.outputs.MERGED_BY }}"
@@ -100,50 +104,71 @@ jobs:
           existingComment="${{ steps.check_existing_pr.outputs.EXISTING_COMMENT }}"
           recordId="${{ steps.check_existing_pr.outputs.EXISTING_ID }}"
           prLink="${{ github.event.pull_request.html_url }}"
+          prTitle="${{ github.event.pull_request.title }}"
+          prAuthor="${{ github.event.pull_request.user.login }}"
+          checkStatuses="${{ steps.fetch_checks.outputs.CHECK_STATUSES }}"
+          checkNames="${{ steps.fetch_checks.outputs.CHECK_NAMES }}"
 
-          # Retain existing reviewers and append new ones if needed
+          # Append reviewer/comment safely
           if [[ -n "$existingReviewer" && "$existingReviewer" != "null" ]]; then
-            updatedReviewer="$existingReviewer $newReviewer"
+            updatedReviewer="$existingReviewer, $newReviewer"
           else
             updatedReviewer="$newReviewer"
           fi
 
-          # Retain existing review comments and append new ones if needed
           if [[ -n "$existingComment" && "$existingComment" != "null" ]]; then
-            updatedComment="$existingComment  $newComment"
+            updatedComment="$existingComment | $newComment"
           else
             updatedComment="$newComment"
           fi
 
-          # Prepare JSON payload
-          PAYLOAD='{
-            "PR_Title__c": "'"${{ github.event.pull_request.title }}"'",
-            "PR_Link__c": "'"$prLink"'",
-            "PR_Status__c": "'"$prStatus"'",
-            "PR_Author__c": "'"${{ github.event.pull_request.user.login }}"'",
-            "PR_Reviewer__c": "'"$updatedReviewer"'",
-            "PR_Check_Status__c": "'"${{ steps.fetch_checks.outputs.CHECK_STATUSES }}"'",
-            "PR_Check_Name__c": "'"${{ steps.fetch_checks.outputs.CHECK_NAMES }}"'",
-            "PR_Review_Comment__c": "'"$updatedComment"'"
-          }'
+          # Build JSON payload safely (handles quotes/newlines)
+          PAYLOAD=$(jq -n \
+            --arg title "$prTitle" \
+            --arg link "$prLink" \
+            --arg status "$prStatus" \
+            --arg author "$prAuthor" \
+            --arg reviewer "$updatedReviewer" \
+            --arg cs "$checkStatuses" \
+            --arg cn "$checkNames" \
+            --arg comment "$updatedComment" \
+            '{
+              PR_Title__c: $title,
+              PR_Link__c: $link,
+              PR_Status__c: $status,
+              PR_Author__c: $author,
+              PR_Reviewer__c: $reviewer,
+              PR_Check_Status__c: $cs,
+              PR_Check_Name__c: $cn,
+              PR_Review_Comment__c: $comment
+            }')
 
-          # If merged, add PR_Merged_By__c
           if [[ -n "$mergedBy" ]]; then
-            PAYLOAD=$(echo "$PAYLOAD" | jq --arg mergedBy "$mergedBy" '. + { "PR_Merged_By__c": $mergedBy }')
+            PAYLOAD=$(echo "$PAYLOAD" | jq --arg mergedBy "$mergedBy" '. + { PR_Merged_By__c: $mergedBy }')
           fi
+
+          echo "Payload:"
+          echo "$PAYLOAD" | jq .
 
           if [[ -n "$recordId" ]]; then
             echo "Updating existing PR record: $recordId"
-            RESPONSE=$(curl -X PATCH "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/$recordId" \
+            RESPONSE=$(curl -sS -X PATCH "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/$recordId" \
               -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
           else
             echo "Creating a new PR record"
-            RESPONSE=$(curl -X POST "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/" \
+            RESPONSE=$(curl -sS -X POST "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/" \
               -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
           fi
 
-          echo "Response: $RESPONSE"
+          echo "Salesforce Response: $RESPONSE"
+
+          # If SF returns an error array on create/update, fail the job
+          if [[ "$(echo "$RESPONSE" | jq -r 'type' 2>/dev/null || echo invalid)" == "array" ]]; then
+            echo "Salesforce write failed:"
+            echo "$RESPONSE" | jq .
+            exit 1
+          fi
