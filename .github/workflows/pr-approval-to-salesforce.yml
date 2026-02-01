@@ -41,13 +41,17 @@ jobs:
             fi
           fi
 
-          # PR closed event
+          # pull_request event (closed / reopened)
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
-              PR_STATUS="Merged"
-              MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
-            else
-              PR_STATUS="Closed"
+            if [[ "${{ github.event.action }}" == "reopened" ]]; then
+              PR_STATUS="Reopened"
+            elif [[ "${{ github.event.action }}" == "closed" ]]; then
+              if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
+                PR_STATUS="Merged"
+                MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
+              else
+                PR_STATUS="Closed"
+              fi
             fi
           fi
 
