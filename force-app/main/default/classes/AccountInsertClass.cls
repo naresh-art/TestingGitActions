@@ -5,7 +5,7 @@
 public with sharing class AccountInsertClass {
     /**
      * @description Inserts a list of Account records and updates their description.
-     * Performs CRUD and FLS validation before insertion.
+     * Performs CRUD and FLS validation before insertion.data
      *
      * @param accList The list of Account records to be inserted.
      * @throws CustomException If the user lacks permission to insert accounts.
