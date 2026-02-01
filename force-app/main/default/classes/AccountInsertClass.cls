@@ -6,7 +6,7 @@ public with sharing class AccountInsertClass {
     /**
      * @description Inserts a list of Account records and updates their description.
      * Performs CRUD and FLS validation before insertion Done
-     *
+     * Performs CRUD and FLS validation before insertion Done
      * @param accList The list of Account records to be inserted.
      * @throws CustomException If the user lacks permission to insert accounts.
      */
@@ -14,7 +14,7 @@ public with sharing class AccountInsertClass {
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
-                    acc.Description = 'Happy PR Approved By Nareshhhh';
+                    acc.Description = 'Happy PR Approved By Naresb Babu1';
                     acc.Rating = 'Hot';
                     acc.Industry = 'Agriculture';
                 }
