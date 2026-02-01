@@ -4,7 +4,7 @@ on:
   pull_request_review:
     types: [submitted]
   pull_request:
-    types: [closed]  # Triggers when a PR is merged
+    types: [closed]
 
 jobs:
   pr_process:
@@ -14,7 +14,7 @@ jobs:
       DOMAIN_URL: ${{ secrets.SF_DOMAIN_URL }}
       OBJECT_NAME: ${{ secrets.SF_OBJECT_NAME }}
 
-      # ✅ GitHub Variables (exact names from your screenshot)
+      # ✅ GitHub Variables (NOT hardcoded)
       CHECK_NAMES: ${{ vars.CHECK_NAMES }}
       CHECK_ACTION_NAME_FIELDS: ${{ vars.CHECK_ACTION_NAME_FIELDS }}
       CHECK_ACTION_STATUS_FIELDS: ${{ vars.CHECK_ACTION_STATUS_FIELDS }}
@@ -25,87 +25,56 @@ jobs:
 
       - name: Determine PR Status
         id: pr_status_check
-        shell: bash
         run: |
           PR_STATUS="Pending"
           MERGED_BY=""
 
-          # pull_request_review event
-          if [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
-            if [[ "${{ github.event.review.state }}" == "approved" ]]; then
-              PR_STATUS="Approved"
-            elif [[ "${{ github.event.review.state }}" == "changes_requested" ]]; then
-              PR_STATUS="Changes Requested"
-            else
-              PR_STATUS="Review Submitted"
-            fi
+          if [[ "${{ github.event.review.state }}" == "approved" ]]; then
+            PR_STATUS="Approved"
+          elif [[ "${{ github.event.review.state }}" == "changes_requested" ]]; then
+            PR_STATUS="Changes Requested"
           fi
 
-          # pull_request closed event
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
-              PR_STATUS="Merged"
-              MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
-            else
-              PR_STATUS="Closed"
-            fi
+          if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
+            PR_STATUS="Merged"
+            MERGED_BY="${{ github.event.pull_request.merged_by.login }}"
           fi
 
-          echo "PR_STATUS=$PR_STATUS" >> "$GITHUB_OUTPUT"
-          echo "MERGED_BY=$MERGED_BY" >> "$GITHUB_OUTPUT"
+          echo "::set-output name=PR_STATUS::$PR_STATUS"
+          echo "::set-output name=MERGED_BY::$MERGED_BY"
 
       - name: Fetch check runs + map checks into SF fields using variables
         id: fetch_checks
-        shell: bash
         run: |
           set -e
 
-          echo "CHECK_NAMES='${CHECK_NAMES}'"
-          echo "CHECK_ACTION_NAME_FIELDS='${CHECK_ACTION_NAME_FIELDS}'"
-          echo "CHECK_ACTION_STATUS_FIELDS='${CHECK_ACTION_STATUS_FIELDS}'"
-
-          # Clean CRLF
-          CHECK_NAMES_CLEAN=$(echo "${CHECK_NAMES}" | tr -d '\r')
-          NAME_FIELDS_CLEAN=$(echo "${CHECK_ACTION_NAME_FIELDS}" | tr -d '\r')
-          STATUS_FIELDS_CLEAN=$(echo "${CHECK_ACTION_STATUS_FIELDS}" | tr -d '\r')
-
-          if [[ -z "$CHECK_NAMES_CLEAN" || -z "$NAME_FIELDS_CLEAN" || -z "$STATUS_FIELDS_CLEAN" ]]; then
-            echo "❌ One or more GitHub Variables are empty. Please verify repository variables."
-            exit 1
-          fi
-
-          CHECK_RUNS=$(curl -s \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          CHECK_RUNS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs")
 
-          # Optional: store all completed checks into comma fields (your old fields)
-          ALL_CHECK_NAMES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status=="completed") | .name' | paste -sd "," -)
-          ALL_CHECK_STATUSES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status=="completed") | (.conclusion // "unknown")' | paste -sd "," -)
+          # Existing comma-separated fields (optional keep)
+          ALL_CHECK_NAMES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | .name' | paste -sd "," -)
+          ALL_CHECK_STATUSES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | (.conclusion // "unknown")' | paste -sd "," -)
 
-          echo "CHECK_NAMES_ALL=$ALL_CHECK_NAMES" >> "$GITHUB_OUTPUT"
-          echo "CHECK_STATUSES_ALL=$ALL_CHECK_STATUSES" >> "$GITHUB_OUTPUT"
+          echo "::set-output name=CHECK_NAMES_ALL::$ALL_CHECK_NAMES"
+          echo "::set-output name=CHECK_STATUSES_ALL::$ALL_CHECK_STATUSES"
 
-          # Split config variables into arrays
-          IFS=',' read -ra CHECK_LIST <<< "$CHECK_NAMES_CLEAN"
-          IFS=',' read -ra NAME_FIELDS <<< "$NAME_FIELDS_CLEAN"
-          IFS=',' read -ra STATUS_FIELDS <<< "$STATUS_FIELDS_CLEAN"
+          # Split GitHub variables into arrays
+          IFS=',' read -ra CHECK_LIST <<< "${CHECK_NAMES}"
+          IFS=',' read -ra NAME_FIELDS <<< "${CHECK_ACTION_NAME_FIELDS}"
+          IFS=',' read -ra STATUS_FIELDS <<< "${CHECK_ACTION_STATUS_FIELDS}"
 
-          # Trim spaces for each item
-          for i in "${!CHECK_LIST[@]}"; do CHECK_LIST[$i]=$(echo "${CHECK_LIST[$i]}" | xargs); done
-          for i in "${!NAME_FIELDS[@]}"; do NAME_FIELDS[$i]=$(echo "${NAME_FIELDS[$i]}" | xargs); done
-          for i in "${!STATUS_FIELDS[@]}"; do STATUS_FIELDS[$i]=$(echo "${STATUS_FIELDS[$i]}" | xargs); done
-
-          # Validate counts match
+          # Validate lengths match
           if [[ ${#CHECK_LIST[@]} -ne ${#NAME_FIELDS[@]} || ${#CHECK_LIST[@]} -ne ${#STATUS_FIELDS[@]} ]]; then
-            echo "❌ Config mismatch:"
+            echo "❌ Config error: counts do not match"
             echo "CHECK_NAMES count=${#CHECK_LIST[@]}"
             echo "CHECK_ACTION_NAME_FIELDS count=${#NAME_FIELDS[@]}"
             echo "CHECK_ACTION_STATUS_FIELDS count=${#STATUS_FIELDS[@]}"
             exit 1
           fi
 
-          # Build JSON object with dynamic SF fields
+          # Build a JSON object like:
+          # {"Check1_Action_Name__c":"xxx","Check1_Action_Status__c":"success", ...}
           SF_CHECK_FIELDS_JSON="{}"
 
           for i in "${!CHECK_LIST[@]}"; do
@@ -113,30 +82,32 @@ jobs:
             nameField="${NAME_FIELDS[$i]}"
             statusField="${STATUS_FIELDS[$i]}"
 
-            # Get conclusion for this check name (completed only)
             status=$(echo "$CHECK_RUNS" | jq -r --arg n "$chk" '
               (.check_runs[] | select(.status=="completed") | select(.name==$n) | (.conclusion // "unknown")) // empty' | head -n 1)
 
-            [[ -z "$status" ]] && status="not_found"
+            if [[ -z "$status" ]]; then
+              status="not_found"
+            fi
 
-            echo "Mapped: $chk -> $nameField / $statusField = $status"
-
+            # Add fields into JSON object
             SF_CHECK_FIELDS_JSON=$(echo "$SF_CHECK_FIELDS_JSON" | jq \
               --arg nf "$nameField" --arg nv "$chk" \
               --arg sf "$statusField" --arg sv "$status" \
               '. + {($nf): $nv, ($sf): $sv}')
           done
 
-          echo "SF_CHECK_FIELDS_JSON=$SF_CHECK_FIELDS_JSON" >> "$GITHUB_OUTPUT"
-          echo "✅ SF_CHECK_FIELDS_JSON=$SF_CHECK_FIELDS_JSON"
+          # Output JSON for next step
+          echo "::set-output name=SF_CHECK_FIELDS_JSON::$SF_CHECK_FIELDS_JSON"
+
+          echo "✅ SF Check Field JSON:"
+          echo "$SF_CHECK_FIELDS_JSON"
 
       - name: Check if PR Record Exists in Salesforce
         id: check_existing_pr
-        shell: bash
         run: |
           PR_LINK="${{ github.event.pull_request.html_url }}"
 
-          RESPONSE=$(curl -s -X GET "${{ env.DOMAIN_URL }}/services/data/v61.0/query/?q=SELECT+Id,PR_Reviewer__c,PR_Review_Comment__c+FROM+${{ env.OBJECT_NAME }}+WHERE+PR_Link__c='${PR_LINK}'+LIMIT+1" \
+          RESPONSE=$(curl -s -X GET "${{ env.DOMAIN_URL }}/services/data/v61.0/query/?q=SELECT+Id,PR_Status__c,PR_Reviewer__c,PR_Review_Comment__c+FROM+${{ env.OBJECT_NAME }}+WHERE+PR_Link__c='${PR_LINK}'" \
             -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json")
 
@@ -144,41 +115,44 @@ jobs:
           EXISTING_REVIEWER=$(echo "$RESPONSE" | jq -r '.records[0].PR_Reviewer__c // empty')
           EXISTING_COMMENT=$(echo "$RESPONSE" | jq -r '.records[0].PR_Review_Comment__c // empty')
 
-          echo "EXISTING_ID=$RECORD_ID" >> "$GITHUB_OUTPUT"
-          echo "EXISTING_REVIEWER=$EXISTING_REVIEWER" >> "$GITHUB_OUTPUT"
-          echo "EXISTING_COMMENT=$EXISTING_COMMENT" >> "$GITHUB_OUTPUT"
+          if [[ -n "$RECORD_ID" ]]; then
+            echo "Existing PR Record Found: $RECORD_ID"
+            echo "::set-output name=EXISTING_ID::$RECORD_ID"
+            echo "::set-output name=EXISTING_REVIEWER::$EXISTING_REVIEWER"
+            echo "::set-output name=EXISTING_COMMENT::$EXISTING_COMMENT"
+          else
+            echo "No existing PR record found"
+            echo "::set-output name=EXISTING_ID::"
+            echo "::set-output name=EXISTING_REVIEWER::"
+            echo "::set-output name=EXISTING_COMMENT::"
+          fi
 
       - name: Send PR Information to Salesforce (Create or Update)
-        shell: bash
         run: |
           set -e
 
           prStatus="${{ steps.pr_status_check.outputs.PR_STATUS }}"
           mergedBy="${{ steps.pr_status_check.outputs.MERGED_BY }}"
-          recordId="${{ steps.check_existing_pr.outputs.EXISTING_ID }}"
-          prLink="${{ github.event.pull_request.html_url }}"
-
           newReviewer="${{ github.event.review.user.login }}"
           newComment="${{ github.event.review.body }}"
           existingReviewer="${{ steps.check_existing_pr.outputs.EXISTING_REVIEWER }}"
           existingComment="${{ steps.check_existing_pr.outputs.EXISTING_COMMENT }}"
+          recordId="${{ steps.check_existing_pr.outputs.EXISTING_ID }}"
+          prLink="${{ github.event.pull_request.html_url }}"
 
-          if [[ -n "$existingReviewer" && "$existingReviewer" != "null" && -n "$newReviewer" && "$newReviewer" != "null" ]]; then
+          if [[ -n "$existingReviewer" && "$existingReviewer" != "null" ]]; then
             updatedReviewer="$existingReviewer $newReviewer"
-          elif [[ -n "$existingReviewer" && "$existingReviewer" != "null" ]]; then
-            updatedReviewer="$existingReviewer"
           else
             updatedReviewer="$newReviewer"
           fi
 
-          if [[ -n "$existingComment" && "$existingComment" != "null" && -n "$newComment" && "$newComment" != "null" ]]; then
+          if [[ -n "$existingComment" && "$existingComment" != "null" ]]; then
             updatedComment="$existingComment  $newComment"
-          elif [[ -n "$existingComment" && "$existingComment" != "null" ]]; then
-            updatedComment="$existingComment"
           else
             updatedComment="$newComment"
           fi
 
+          # Base payload
           BASE=$(jq -n \
             --arg title "${{ github.event.pull_request.title }}" \
             --arg link "$prLink" \
@@ -199,6 +173,7 @@ jobs:
               PR_Check_Status__c: $allStats
             }')
 
+          # Merge dynamic check fields JSON
           CHECK_FIELDS='${{ steps.fetch_checks.outputs.SF_CHECK_FIELDS_JSON }}'
           PAYLOAD=$(echo "$BASE" | jq ". + $CHECK_FIELDS")
 
