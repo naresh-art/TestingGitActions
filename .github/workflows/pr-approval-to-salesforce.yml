@@ -4,7 +4,7 @@ on:
   pull_request_review:
     types: [submitted]
   pull_request:
-    types: [closed]  # Triggers when a PR is merged
+    types: [closed]
 
 jobs:
   pr_process:
@@ -14,7 +14,15 @@ jobs:
       DOMAIN_URL: ${{ secrets.SF_DOMAIN_URL }}
       OBJECT_NAME: ${{ secrets.SF_OBJECT_NAME }}
 
+      # ✅ GitHub Variables (NOT hardcoded)
+      CHECK_NAMES: ${{ vars.CHECK_NAMES }}
+      CHECK_ACTION_NAME_FIELDS: ${{ vars.CHECK_ACTION_NAME_FIELDS }}
+      CHECK_ACTION_STATUS_FIELDS: ${{ vars.CHECK_ACTION_STATUS_FIELDS }}
+
     steps:
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
       - name: Determine PR Status
         id: pr_status_check
         run: |
@@ -35,37 +43,64 @@ jobs:
           echo "::set-output name=PR_STATUS::$PR_STATUS"
           echo "::set-output name=MERGED_BY::$MERGED_BY"
 
-      - name: Fetch all check runs for the PR (and map first 2 into separate outputs)
+      - name: Fetch check runs + map checks into SF fields using variables
         id: fetch_checks
         run: |
+          set -e
+
           CHECK_RUNS=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs)
+            "https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs")
 
-          # Existing comma-separated fields (keep as-is if you want)
-          CHECK_NAMES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | .name' | paste -sd "," -)
-          CHECK_STATUSES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | (.conclusion // "unknown")' | paste -sd "," -)
+          # Existing comma-separated fields (optional keep)
+          ALL_CHECK_NAMES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | .name' | paste -sd "," -)
+          ALL_CHECK_STATUSES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status == "completed") | (.conclusion // "unknown")' | paste -sd "," -)
 
-          # ✅ NEW: pick FIRST TWO completed checks (no hardcoding)
-          CHECK1_NAME=$(echo "$CHECK_RUNS" | jq -r '[.check_runs[] | select(.status=="completed") | .name][0] // empty')
-          CHECK1_STATUS=$(echo "$CHECK_RUNS" | jq -r '[.check_runs[] | select(.status=="completed") | (.conclusion // "unknown")][0] // empty')
+          echo "::set-output name=CHECK_NAMES_ALL::$ALL_CHECK_NAMES"
+          echo "::set-output name=CHECK_STATUSES_ALL::$ALL_CHECK_STATUSES"
 
-          CHECK2_NAME=$(echo "$CHECK_RUNS" | jq -r '[.check_runs[] | select(.status=="completed") | .name][1] // empty')
-          CHECK2_STATUS=$(echo "$CHECK_RUNS" | jq -r '[.check_runs[] | select(.status=="completed") | (.conclusion // "unknown")][1] // empty')
+          # Split GitHub variables into arrays
+          IFS=',' read -ra CHECK_LIST <<< "${CHECK_NAMES}"
+          IFS=',' read -ra NAME_FIELDS <<< "${CHECK_ACTION_NAME_FIELDS}"
+          IFS=',' read -ra STATUS_FIELDS <<< "${CHECK_ACTION_STATUS_FIELDS}"
 
-          # Fallbacks if not found
-          if [[ -z "$CHECK1_NAME" ]]; then CHECK1_NAME="not_found"; fi
-          if [[ -z "$CHECK1_STATUS" ]]; then CHECK1_STATUS="not_found"; fi
-          if [[ -z "$CHECK2_NAME" ]]; then CHECK2_NAME="not_found"; fi
-          if [[ -z "$CHECK2_STATUS" ]]; then CHECK2_STATUS="not_found"; fi
+          # Validate lengths match
+          if [[ ${#CHECK_LIST[@]} -ne ${#NAME_FIELDS[@]} || ${#CHECK_LIST[@]} -ne ${#STATUS_FIELDS[@]} ]]; then
+            echo "❌ Config error: counts do not match"
+            echo "CHECK_NAMES count=${#CHECK_LIST[@]}"
+            echo "CHECK_ACTION_NAME_FIELDS count=${#NAME_FIELDS[@]}"
+            echo "CHECK_ACTION_STATUS_FIELDS count=${#STATUS_FIELDS[@]}"
+            exit 1
+          fi
 
-          echo "::set-output name=CHECK_NAMES::$CHECK_NAMES"
-          echo "::set-output name=CHECK_STATUSES::$CHECK_STATUSES"
+          # Build a JSON object like:
+          # {"Check1_Action_Name__c":"xxx","Check1_Action_Status__c":"success", ...}
+          SF_CHECK_FIELDS_JSON="{}"
 
-          echo "::set-output name=CHECK1_NAME::$CHECK1_NAME"
-          echo "::set-output name=CHECK1_STATUS::$CHECK1_STATUS"
-          echo "::set-output name=CHECK2_NAME::$CHECK2_NAME"
-          echo "::set-output name=CHECK2_STATUS::$CHECK2_STATUS"
+          for i in "${!CHECK_LIST[@]}"; do
+            chk="${CHECK_LIST[$i]}"
+            nameField="${NAME_FIELDS[$i]}"
+            statusField="${STATUS_FIELDS[$i]}"
+
+            status=$(echo "$CHECK_RUNS" | jq -r --arg n "$chk" '
+              (.check_runs[] | select(.status=="completed") | select(.name==$n) | (.conclusion // "unknown")) // empty' | head -n 1)
+
+            if [[ -z "$status" ]]; then
+              status="not_found"
+            fi
+
+            # Add fields into JSON object
+            SF_CHECK_FIELDS_JSON=$(echo "$SF_CHECK_FIELDS_JSON" | jq \
+              --arg nf "$nameField" --arg nv "$chk" \
+              --arg sf "$statusField" --arg sv "$status" \
+              '. + {($nf): $nv, ($sf): $sv}')
+          done
+
+          # Output JSON for next step
+          echo "::set-output name=SF_CHECK_FIELDS_JSON::$SF_CHECK_FIELDS_JSON"
+
+          echo "✅ SF Check Field JSON:"
+          echo "$SF_CHECK_FIELDS_JSON"
 
       - name: Check if PR Record Exists in Salesforce
         id: check_existing_pr
@@ -77,7 +112,6 @@ jobs:
             -H "Content-Type: application/json")
 
           RECORD_ID=$(echo "$RESPONSE" | jq -r '.records[0].Id // empty')
-          EXISTING_STATUS=$(echo "$RESPONSE" | jq -r '.records[0].PR_Status__c // empty')
           EXISTING_REVIEWER=$(echo "$RESPONSE" | jq -r '.records[0].PR_Reviewer__c // empty')
           EXISTING_COMMENT=$(echo "$RESPONSE" | jq -r '.records[0].PR_Review_Comment__c // empty')
 
@@ -95,6 +129,8 @@ jobs:
 
       - name: Send PR Information to Salesforce (Create or Update)
         run: |
+          set -e
+
           prStatus="${{ steps.pr_status_check.outputs.PR_STATUS }}"
           mergedBy="${{ steps.pr_status_check.outputs.MERGED_BY }}"
           newReviewer="${{ github.event.review.user.login }}"
@@ -104,58 +140,56 @@ jobs:
           recordId="${{ steps.check_existing_pr.outputs.EXISTING_ID }}"
           prLink="${{ github.event.pull_request.html_url }}"
 
-          # Retain existing reviewers and append new ones if needed
           if [[ -n "$existingReviewer" && "$existingReviewer" != "null" ]]; then
             updatedReviewer="$existingReviewer $newReviewer"
           else
             updatedReviewer="$newReviewer"
           fi
 
-          # Retain existing review comments and append new ones if needed
           if [[ -n "$existingComment" && "$existingComment" != "null" ]]; then
             updatedComment="$existingComment  $newComment"
           else
             updatedComment="$newComment"
           fi
 
-          check1Name="${{ steps.fetch_checks.outputs.CHECK1_NAME }}"
-          check1Status="${{ steps.fetch_checks.outputs.CHECK1_STATUS }}"
-          check2Name="${{ steps.fetch_checks.outputs.CHECK2_NAME }}"
-          check2Status="${{ steps.fetch_checks.outputs.CHECK2_STATUS }}"
+          # Base payload
+          BASE=$(jq -n \
+            --arg title "${{ github.event.pull_request.title }}" \
+            --arg link "$prLink" \
+            --arg status "$prStatus" \
+            --arg author "${{ github.event.pull_request.user.login }}" \
+            --arg reviewer "$updatedReviewer" \
+            --arg comment "$updatedComment" \
+            --arg allNames "${{ steps.fetch_checks.outputs.CHECK_NAMES_ALL }}" \
+            --arg allStats "${{ steps.fetch_checks.outputs.CHECK_STATUSES_ALL }}" \
+            '{
+              PR_Title__c: $title,
+              PR_Link__c: $link,
+              PR_Status__c: $status,
+              PR_Author__c: $author,
+              PR_Reviewer__c: $reviewer,
+              PR_Review_Comment__c: $comment,
+              PR_Check_Name__c: $allNames,
+              PR_Check_Status__c: $allStats
+            }')
 
-          # Prepare JSON payload
-          PAYLOAD='{
-            "PR_Title__c": "'"${{ github.event.pull_request.title }}"'",
-            "PR_Link__c": "'"$prLink"'",
-            "PR_Status__c": "'"$prStatus"'",
-            "PR_Author__c": "'"${{ github.event.pull_request.user.login }}"'",
-            "PR_Reviewer__c": "'"$updatedReviewer"'",
+          # Merge dynamic check fields JSON
+          CHECK_FIELDS='${{ steps.fetch_checks.outputs.SF_CHECK_FIELDS_JSON }}'
+          PAYLOAD=$(echo "$BASE" | jq ". + $CHECK_FIELDS")
 
-            "PR_Check_Status__c": "'"${{ steps.fetch_checks.outputs.CHECK_STATUSES }}"'",
-            "PR_Check_Name__c": "'"${{ steps.fetch_checks.outputs.CHECK_NAMES }}"'",
-
-            "Check1_Action_Name__c": "'"$check1Name"'",
-            "Check1_Action_Status__c": "'"$check1Status"'",
-            "Check2_Action_Name__c": "'"$check2Name"'",
-            "Check2_Action_Status__c": "'"$check2Status"'",
-
-            "PR_Review_Comment__c": "'"$updatedComment"'"
-          }'
-
-          # If merged, add PR_Merged_By__c
           if [[ -n "$mergedBy" ]]; then
-            PAYLOAD=$(echo "$PAYLOAD" | jq --arg mergedBy "$mergedBy" '. + { "PR_Merged_By__c": $mergedBy }')
+            PAYLOAD=$(echo "$PAYLOAD" | jq --arg mergedBy "$mergedBy" '. + { PR_Merged_By__c: $mergedBy }')
           fi
 
           if [[ -n "$recordId" ]]; then
             echo "Updating existing PR record: $recordId"
-            RESPONSE=$(curl -X PATCH "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/$recordId" \
+            RESPONSE=$(curl -s -X PATCH "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/$recordId" \
               -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
           else
             echo "Creating a new PR record"
-            RESPONSE=$(curl -X POST "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/" \
+            RESPONSE=$(curl -s -X POST "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/" \
               -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
