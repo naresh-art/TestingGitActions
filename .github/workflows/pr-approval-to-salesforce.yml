@@ -4,7 +4,7 @@ on:
   pull_request_review:
     types: [submitted]
   pull_request:
-    types: [closed, reopened]
+    types: [opened, closed, reopened]
 
 jobs:
   pr_process:
@@ -41,9 +41,11 @@ jobs:
             fi
           fi
 
-          # pull_request event (closed / reopened)
+          # pull_request event (opened / reopened / closed)
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            if [[ "${{ github.event.action }}" == "reopened" ]]; then
+            if [[ "${{ github.event.action }}" == "opened" ]]; then
+              PR_STATUS="Created"
+            elif [[ "${{ github.event.action }}" == "reopened" ]]; then
               PR_STATUS="Reopened"
             elif [[ "${{ github.event.action }}" == "closed" ]]; then
               if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
@@ -167,8 +169,15 @@ jobs:
           recordId="${{ steps.check_existing_pr.outputs.EXISTING_ID }}"
           prLink="${{ github.event.pull_request.html_url }}"
 
-          newReviewer="${{ github.event.review.user.login }}"
-          newComment="${{ github.event.review.body }}"
+          newReviewer=""
+          newComment=""
+
+          # Only review event has github.event.review.*
+          if [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
+            newReviewer="${{ github.event.review.user.login }}"
+            newComment="${{ github.event.review.body }}"
+          fi
+
           existingReviewer="${{ steps.check_existing_pr.outputs.EXISTING_REVIEWER }}"
           existingComment="${{ steps.check_existing_pr.outputs.EXISTING_COMMENT }}"
 
