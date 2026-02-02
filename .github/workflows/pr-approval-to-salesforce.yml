@@ -145,11 +145,28 @@ jobs:
         id: check_existing_pr
         shell: bash
         run: |
+          set -euo pipefail
+
           PR_LINK="${{ github.event.pull_request.html_url }}"
 
-          RESPONSE=$(curl -s -X GET "${{ env.DOMAIN_URL }}/services/data/v61.0/query/?q=SELECT+Id,PR_Reviewer__c,PR_Review_Comment__c+FROM+${{ env.OBJECT_NAME }}+WHERE+PR_Link__c='${PR_LINK}'+LIMIT+1" \
+          # Build SOQL safely (PR_LINK will be URL-encoded by curl)
+          SOQL="SELECT Id, PR_Reviewer__c, PR_Review_Comment__c FROM ${{ env.OBJECT_NAME }} WHERE PR_Link__c='${PR_LINK}' LIMIT 1"
+
+          # Call Salesforce query endpoint safely using -G + --data-urlencode
+          RESPONSE=$(curl -sS -G "${{ env.DOMAIN_URL }}/services/data/v61.0/query" \
             -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
-            -H "Content-Type: application/json")
+            -H "Content-Type: application/json" \
+            --data-urlencode "q=${SOQL}")
+
+          echo "Raw Salesforce response:"
+          echo "$RESPONSE"
+
+          # If Salesforce returned an error array, fail early with the message
+          if [[ "$(echo "$RESPONSE" | jq -r 'type')" == "array" ]]; then
+            echo "❌ Salesforce query failed:"
+            echo "$RESPONSE" | jq -r '.[0].errorCode + ": " + .[0].message'
+            exit 1
+          fi
 
           RECORD_ID=$(echo "$RESPONSE" | jq -r '.records[0].Id // empty')
           EXISTING_REVIEWER=$(echo "$RESPONSE" | jq -r '.records[0].PR_Reviewer__c // empty')

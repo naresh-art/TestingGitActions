@@ -36,11 +36,11 @@ public with sharing class DummyAccountClass {
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
-                    acc.Description = 'Happy Welcome Account Checks Data Testt';
+                    acc.Description = 'Happy Welcome Account Checks Data Testtttss';
                 }
             }
             insert accList;
-            // System.debug('Test 1 seviorityyy test data test123');
+            //System.debug('Test 1 seviorityyy test data test123');
         } else {
             throw new CustomException('You do not have permission to create Account records.');
         }
