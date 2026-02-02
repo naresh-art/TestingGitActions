@@ -6,6 +6,9 @@ on:
       - '**'
   workflow_dispatch:
 
+permissions:
+  contents: write   # ✅ required for pushing Scanner_Reports branch
+
 jobs:
   quality-gate-code-check:
     runs-on: ubuntu-latest
@@ -17,7 +20,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ✅ Your exact step (kept as you provided)
+      # ✅ Your exact step (as you provided)
       - name: Get Repository and Branch Info
         shell: bash
         run: |
@@ -47,11 +50,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
           SHORT_SHA=$(git rev-parse --short HEAD)
 
-          # sanitize FILE_TITLE so it becomes a valid file name
           SAFE_TITLE=$(echo "${FILE_TITLE}" | tr ' ' '_' | tr -cd 'A-Za-z0-9_.-')
           SAFE_TITLE=$(echo "${SAFE_TITLE}" | cut -c1-120)
 
@@ -83,7 +84,6 @@ jobs:
           set -euo pipefail
           git fetch --unshallow || true
           if [ "$(git rev-list --count HEAD)" -gt "1" ]; then
-            echo "Fetching changed files between HEAD~1 and HEAD"
             git diff --name-only HEAD~1 HEAD > changed_files.txt
           else
             echo "No previous commit to compare to." > changed_files.txt
@@ -127,25 +127,21 @@ jobs:
         run: |
           set -euo pipefail
           if [ -f scanner-report.csv ]; then
-            echo "Processing scanner-report.csv"
             severity_fail_count=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count+0}' scanner-report.csv)
             echo "Severity 3 issues count: $severity_fail_count"
 
             if [ "$severity_fail_count" -gt 0 ]; then
-              echo "Blocking your pull request due to severity 3 vulnerabilities found."
               echo "block-status=true" >> "$GITHUB_OUTPUT"
               exit 1
             else
-              echo "No severity 3 vulnerabilities found. Proceeding with Approval."
               echo "block-status=false" >> "$GITHUB_OUTPUT"
             fi
           else
-            echo "No scanner report found."
             echo "block-status=true" >> "$GITHUB_OUTPUT"
             exit 1
           fi
 
-      # ✅ Copy to your unique filename (REPORT_FILE)
+      # ✅ Rename to your unique filename (REPORT_FILE)
       - name: Rename Scanner Report File
         if: always()
         shell: bash
@@ -154,14 +150,60 @@ jobs:
           cp scanner-report.csv "${REPORT_FILE}"
           echo "✅ Copied scanner-report.csv -> ${REPORT_FILE}"
 
-      # ✅ Upload artifact with same unique name
+      # ✅ Upload artifact with unique name
       - name: Upload Scanner Report
         id: upload-report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SFDX_Code_Scan_Report_${{ env.REPORT_FILE }}
+          name: ${{ env.REPORT_FILE }}
           path: ${{ env.REPORT_FILE }}
+
+      # ✅ NEW: Commit & push report into Scanner_Reports branch under Artifact/
+      - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
+        if: always()
+        shell: bash
+        env:
+          GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GIT_TOKEN:-}" ]; then
+            echo "❌ GIT_TOKEN secret is missing. Add it in repo secrets."
+            exit 1
+          fi
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          BRANCH_NAME="Scanner_Reports"
+          echo "✅ Target Branch: $BRANCH_NAME"
+
+          # ✅ Use PAT for pushing
+          git remote set-url origin "https://x-access-token:${GIT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
+          git fetch origin "+refs/heads/*:refs/remotes/origin/*"
+
+          # ✅ Checkout or create branch
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
+            echo "✅ Remote branch $BRANCH_NAME exists."
+            git checkout -B "$BRANCH_NAME" "origin/$BRANCH_NAME"
+          else
+            echo "❌ Remote branch $BRANCH_NAME does not exist! Creating it now..."
+            git checkout --orphan "$BRANCH_NAME"
+            git rm -rf . >/dev/null 2>&1 || true
+            git commit --allow-empty -m "Initialize $BRANCH_NAME branch"
+            git push -u origin "$BRANCH_NAME"
+          fi
+
+          mkdir -p Artifact
+          cp "${REPORT_FILE}" "Artifact/${REPORT_FILE}"
+          echo "✅ Stored report at Artifact/${REPORT_FILE}"
+
+          git add "Artifact/${REPORT_FILE}"
+
+          git commit -m "🔄 Auto-update scanner report (${REPORT_FILE})" || echo "No changes to commit"
+          git push origin "$BRANCH_NAME"
 
   quality-gate-critical-permissions-check:
     runs-on: ubuntu-latest
@@ -230,9 +272,7 @@ jobs:
 
           if [ ${#BLOCKED_FILES[@]} -gt 0 ]; then
             echo "❌ Critical permissions found in the following modified files:"
-            for FILE in "${BLOCKED_FILES[@]}"; do
-              echo "$FILE"
-            done
+            printf "%s\n" "${BLOCKED_FILES[@]}"
             exit 1
           else
             echo "✅ No critical permissions found in modified files."
