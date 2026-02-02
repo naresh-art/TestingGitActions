@@ -28,6 +28,7 @@ jobs:
       DOMAIN_URL: ${{ vars.SF_DOMAIN_URL }}
       OBJECT_NAME: ${{ vars.SF_OBJECT_NAME }}
 
+      # ✅ GitHub Variables (NOT hardcoded)
       CHECK_NAMES: ${{ vars.CHECK_NAMES }}
       CHECK_ACTION_NAME_FIELDS: ${{ vars.CHECK_ACTION_NAME_FIELDS }}
       CHECK_ACTION_STATUS_FIELDS: ${{ vars.CHECK_ACTION_STATUS_FIELDS }}
@@ -104,7 +105,6 @@ jobs:
           prMerged="${{ steps.pr_ctx.outputs.PR_MERGED }}"
           prMergedBy="${{ steps.pr_ctx.outputs.PR_MERGED_BY }}"
 
-          # review event => Approved / Changes Requested / Review Submitted
           if [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
             if [[ "${{ github.event.review.state }}" == "approved" ]]; then
               PR_STATUS="Approved"
@@ -114,7 +114,6 @@ jobs:
               PR_STATUS="Review Submitted"
             fi
           else
-            # other events: open/closed/merged
             if [[ "$prMerged" == "true" ]]; then
               PR_STATUS="Merged"
               MERGED_BY="$prMergedBy"
@@ -140,7 +139,6 @@ jobs:
           SHA="${{ steps.pr_ctx.outputs.PR_HEAD_SHA }}"
           TOKEN="${{ secrets.GITHUB_TOKEN }}"
 
-          # Clean CRLF and trim
           CHECK_NAMES_CLEAN=$(echo "${CHECK_NAMES}" | tr -d '\r')
           NAME_FIELDS_CLEAN=$(echo "${CHECK_ACTION_NAME_FIELDS}" | tr -d '\r')
           STATUS_FIELDS_CLEAN=$(echo "${CHECK_ACTION_STATUS_FIELDS}" | tr -d '\r')
@@ -151,25 +149,22 @@ jobs:
             exit 1
           fi
 
-          # Split variables into arrays
           IFS=',' read -ra CHECK_LIST <<< "$CHECK_NAMES_CLEAN"
           IFS=',' read -ra NAME_FIELDS <<< "$NAME_FIELDS_CLEAN"
           IFS=',' read -ra STATUS_FIELDS <<< "$STATUS_FIELDS_CLEAN"
           IFS=',' read -ra REPORT_FIELDS <<< "$REPORT_FIELDS_CLEAN"
 
-          # Trim spaces
           for i in "${!CHECK_LIST[@]}"; do CHECK_LIST[$i]=$(echo "${CHECK_LIST[$i]}" | xargs); done
           for i in "${!NAME_FIELDS[@]}"; do NAME_FIELDS[$i]=$(echo "${NAME_FIELDS[$i]}" | xargs); done
           for i in "${!STATUS_FIELDS[@]}"; do STATUS_FIELDS[$i]=$(echo "${STATUS_FIELDS[$i]}" | xargs); done
           for i in "${!REPORT_FIELDS[@]}"; do REPORT_FIELDS[$i]=$(echo "${REPORT_FIELDS[$i]}" | xargs); done
 
-          # Validate lengths match
           if [[ ${#CHECK_LIST[@]} -ne ${#NAME_FIELDS[@]} || ${#CHECK_LIST[@]} -ne ${#STATUS_FIELDS[@]} || ${#CHECK_LIST[@]} -ne ${#REPORT_FIELDS[@]} ]]; then
             echo "❌ Config error: counts do not match"
             exit 1
           fi
 
-          # ✅ retry a few times (checks may take few seconds to appear)
+          # Fetch check-runs (retry because GitHub sometimes returns 0 briefly)
           CHECK_RUNS=""
           for attempt in {1..6}; do
             CHECK_RUNS=$(curl -sS \
@@ -183,7 +178,8 @@ jobs:
             sleep 5
           done
 
-          # Store ALL check names + derived statuses (not only completed)
+          echo "Total check_runs found: $(echo "$CHECK_RUNS" | jq -r '.total_count // 0')"
+
           ALL_CHECK_NAMES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[]?.name' | paste -sd "," -)
           ALL_CHECK_STATUSES=$(echo "$CHECK_RUNS" | jq -r '
             .check_runs[]? |
@@ -201,48 +197,49 @@ jobs:
             statusField="${STATUS_FIELDS[$i]}"
             reportField="${REPORT_FIELDS[$i]}"
 
-            # Find the FIRST matching check run
-            run=$(echo "$CHECK_RUNS" | jq -c --arg n "$chk" '.check_runs[]? | select(.name==$n)' | head -n 1)
+            # ✅ FIX: pick the LATEST run for this check name
+            run=$(echo "$CHECK_RUNS" | jq -c --arg n "$chk" '
+              [ .check_runs[]? | select(.name==$n) ]
+              | sort_by(.completed_at // .started_at // .created_at)
+              | last // empty
+            ')
 
-            # Default values
             derivedStatus="not_found"
             artifactNames=""
 
-            if [[ -n "$run" ]]; then
+            if [[ -n "$run" && "$run" != "null" ]]; then
               st=$(echo "$run" | jq -r '.status // "unknown"')
               concl=$(echo "$run" | jq -r '.conclusion // empty')
               detailsUrl=$(echo "$run" | jq -r '.details_url // empty')
 
-              # ✅ derivedStatus: queued / in_progress / success / failure etc
               if [[ "$st" != "completed" ]]; then
                 derivedStatus="$st"
               else
                 derivedStatus="${concl:-unknown}"
               fi
 
-              # ✅ artifact: only available after workflow run uploads it
-              # Extract run_id from actions URL: /actions/runs/<run_id>/job/<job_id>
               runId=$(echo "$detailsUrl" | sed -n 's#.*\/actions\/runs\/\([0-9]\+\).*#\1#p' | head -n 1)
 
               if [[ -n "$runId" ]]; then
-                ART_JSON=$(curl -sS \
-                  -H "Authorization: Bearer $TOKEN" \
-                  -H "Accept: application/vnd.github.v3+json" \
-                  "https://api.github.com/repos/${REPO}/actions/runs/${runId}/artifacts")
+                # ✅ Artifact API sometimes lags — retry a few times
+                for a in {1..6}; do
+                  ART_JSON=$(curl -sS \
+                    -H "Authorization: Bearer $TOKEN" \
+                    -H "Accept: application/vnd.github.v3+json" \
+                    "https://api.github.com/repos/${REPO}/actions/runs/${runId}/artifacts")
 
-                names=$(echo "$ART_JSON" | jq -r '.artifacts[]?.name' | paste -sd "," -)
-                if [[ -n "$names" ]]; then
-                  artifactNames="$names"
-                fi
+                  names=$(echo "$ART_JSON" | jq -r '.artifacts[]?.name' | paste -sd "," -)
+                  if [[ -n "$names" ]]; then
+                    artifactNames="$names"
+                    break
+                  fi
+                  sleep 5
+                done
               fi
             fi
 
-            echo "Mapped: $chk -> $derivedStatus / ${artifactNames:-<null>}"
+            echo "Mapped: $chk -> status=$derivedStatus artifact=${artifactNames:-<null>}"
 
-            # Build JSON:
-            # - Always set nameField
-            # - Always set statusField
-            # - reportField = artifactNames OR null
             if [[ -n "$artifactNames" ]]; then
               SF_CHECK_FIELDS_JSON=$(echo "$SF_CHECK_FIELDS_JSON" | jq \
                 --arg nf "$nameField" --arg nv "$chk" \
