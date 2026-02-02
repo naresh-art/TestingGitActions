@@ -19,6 +19,9 @@ jobs:
       CHECK_ACTION_NAME_FIELDS: ${{ vars.CHECK_ACTION_NAME_FIELDS }}
       CHECK_ACTION_STATUS_FIELDS: ${{ vars.CHECK_ACTION_STATUS_FIELDS }}
 
+      # ✅ NEW: SF fields for artifact/report names
+      CHECK_ACTION_REPORT_FIELDS: ${{ vars.CHECK_ACTION_REPORT_FIELDS }}
+
     steps:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -60,30 +63,40 @@ jobs:
           echo "PR_STATUS=$PR_STATUS" >> "$GITHUB_OUTPUT"
           echo "MERGED_BY=$MERGED_BY" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch check runs + map checks into SF fields using variables
+      - name: Fetch check runs + map checks into SF fields using variables (with artifact file names)
         id: fetch_checks
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           echo "CHECK_NAMES: ${CHECK_NAMES}"
           echo "CHECK_ACTION_NAME_FIELDS: ${CHECK_ACTION_NAME_FIELDS}"
           echo "CHECK_ACTION_STATUS_FIELDS: ${CHECK_ACTION_STATUS_FIELDS}"
+          echo "CHECK_ACTION_REPORT_FIELDS: ${CHECK_ACTION_REPORT_FIELDS}"
 
           # Clean CRLF and trim
           CHECK_NAMES_CLEAN=$(echo "${CHECK_NAMES}" | tr -d '\r')
           NAME_FIELDS_CLEAN=$(echo "${CHECK_ACTION_NAME_FIELDS}" | tr -d '\r')
           STATUS_FIELDS_CLEAN=$(echo "${CHECK_ACTION_STATUS_FIELDS}" | tr -d '\r')
+          REPORT_FIELDS_CLEAN=$(echo "${CHECK_ACTION_REPORT_FIELDS}" | tr -d '\r')
 
-          if [[ -z "$CHECK_NAMES_CLEAN" || -z "$NAME_FIELDS_CLEAN" || -z "$STATUS_FIELDS_CLEAN" ]]; then
+          if [[ -z "$CHECK_NAMES_CLEAN" || -z "$NAME_FIELDS_CLEAN" || -z "$STATUS_FIELDS_CLEAN" || -z "$REPORT_FIELDS_CLEAN" ]]; then
             echo "❌ One or more GitHub Variables are empty."
             exit 1
           fi
 
-          CHECK_RUNS=$(curl -s \
+          CHECK_RUNS=$(curl -sS \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}/check-runs")
+
+          # If GitHub returned an error
+          GH_MSG=$(echo "$CHECK_RUNS" | jq -r '.message // empty')
+          if [[ -n "$GH_MSG" && "$GH_MSG" != "null" ]]; then
+            echo "❌ GitHub API error: $GH_MSG"
+            echo "$CHECK_RUNS"
+            exit 1
+          fi
 
           # Store all completed checks (optional)
           ALL_CHECK_NAMES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[] | select(.status=="completed") | .name' | paste -sd "," -)
@@ -96,18 +109,21 @@ jobs:
           IFS=',' read -ra CHECK_LIST <<< "$CHECK_NAMES_CLEAN"
           IFS=',' read -ra NAME_FIELDS <<< "$NAME_FIELDS_CLEAN"
           IFS=',' read -ra STATUS_FIELDS <<< "$STATUS_FIELDS_CLEAN"
+          IFS=',' read -ra REPORT_FIELDS <<< "$REPORT_FIELDS_CLEAN"
 
           # Trim spaces
           for i in "${!CHECK_LIST[@]}"; do CHECK_LIST[$i]=$(echo "${CHECK_LIST[$i]}" | xargs); done
           for i in "${!NAME_FIELDS[@]}"; do NAME_FIELDS[$i]=$(echo "${NAME_FIELDS[$i]}" | xargs); done
           for i in "${!STATUS_FIELDS[@]}"; do STATUS_FIELDS[$i]=$(echo "${STATUS_FIELDS[$i]}" | xargs); done
+          for i in "${!REPORT_FIELDS[@]}"; do REPORT_FIELDS[$i]=$(echo "${REPORT_FIELDS[$i]}" | xargs); done
 
           # Validate lengths match
-          if [[ ${#CHECK_LIST[@]} -ne ${#NAME_FIELDS[@]} || ${#CHECK_LIST[@]} -ne ${#STATUS_FIELDS[@]} ]]; then
+          if [[ ${#CHECK_LIST[@]} -ne ${#NAME_FIELDS[@]} || ${#CHECK_LIST[@]} -ne ${#STATUS_FIELDS[@]} || ${#CHECK_LIST[@]} -ne ${#REPORT_FIELDS[@]} ]]; then
             echo "❌ Config error: counts do not match"
             echo "CHECK_NAMES count=${#CHECK_LIST[@]}"
             echo "CHECK_ACTION_NAME_FIELDS count=${#NAME_FIELDS[@]}"
             echo "CHECK_ACTION_STATUS_FIELDS count=${#STATUS_FIELDS[@]}"
+            echo "CHECK_ACTION_REPORT_FIELDS count=${#REPORT_FIELDS[@]}"
             exit 1
           fi
 
@@ -117,18 +133,63 @@ jobs:
             chk="${CHECK_LIST[$i]}"
             nameField="${NAME_FIELDS[$i]}"
             statusField="${STATUS_FIELDS[$i]}"
+            reportField="${REPORT_FIELDS[$i]}"
 
+            # ---- status (default: not_found) ----
             status=$(echo "$CHECK_RUNS" | jq -r --arg n "$chk" '
               (.check_runs[] | select(.status=="completed") | select(.name==$n) | (.conclusion // "unknown")) // empty' | head -n 1)
-
             [[ -z "$status" ]] && status="not_found"
 
-            echo "Mapped: $chk -> $nameField / $statusField = $status"
+            # ---- artifact names (default blank/null) ----
+            artifactNames=""
 
-            SF_CHECK_FIELDS_JSON=$(echo "$SF_CHECK_FIELDS_JSON" | jq \
-              --arg nf "$nameField" --arg nv "$chk" \
-              --arg sf "$statusField" --arg sv "$status" \
-              '. + {($nf): $nv, ($sf): $sv}')
+            # get details_url for this check run
+            detailsUrl=$(echo "$CHECK_RUNS" | jq -r --arg n "$chk" '
+              (.check_runs[] | select(.name==$n) | .details_url) // empty' | head -n 1)
+
+            if [[ -n "$detailsUrl" && "$detailsUrl" != "null" ]]; then
+              # extract run_id from URL like: .../actions/runs/123456789
+              runId=$(echo "$detailsUrl" | sed -n 's#.*\/actions\/runs\/\([0-9]\+\).*#\1#p' | head -n 1)
+
+              if [[ -n "$runId" ]]; then
+                ART_JSON=$(curl -sS \
+                  -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+                  -H "Accept: application/vnd.github.v3+json" \
+                  "https://api.github.com/repos/${{ github.repository }}/actions/runs/${runId}/artifacts")
+
+                ART_MSG=$(echo "$ART_JSON" | jq -r '.message // empty')
+                if [[ -n "$ART_MSG" && "$ART_MSG" != "null" ]]; then
+                  echo "⚠️ Artifact API message for $chk: $ART_MSG"
+                  # keep artifactNames blank
+                else
+                  # join artifact names by comma
+                  names=$(echo "$ART_JSON" | jq -r '.artifacts[]?.name' | paste -sd "," -)
+                  if [[ -n "$names" ]]; then
+                    artifactNames="$names"
+                  fi
+                fi
+              fi
+            fi
+
+            echo "Mapped: $chk -> $nameField/$statusField/$reportField = $status / ${artifactNames:-<null>}"
+
+            # Build JSON mapping:
+            # - nameField always set to check name
+            # - statusField always set to status
+            # - reportField set to artifactNames if exists else null (blank)
+            if [[ -n "$artifactNames" ]]; then
+              SF_CHECK_FIELDS_JSON=$(echo "$SF_CHECK_FIELDS_JSON" | jq \
+                --arg nf "$nameField" --arg nv "$chk" \
+                --arg sf "$statusField" --arg sv "$status" \
+                --arg rf "$reportField" --arg rv "$artifactNames" \
+                '. + {($nf): $nv, ($sf): $sv, ($rf): $rv}')
+            else
+              SF_CHECK_FIELDS_JSON=$(echo "$SF_CHECK_FIELDS_JSON" | jq \
+                --arg nf "$nameField" --arg nv "$chk" \
+                --arg sf "$statusField" --arg sv "$status" \
+                --arg rf "$reportField" \
+                '. + {($nf): $nv, ($sf): $sv, ($rf): null}')
+            fi
           done
 
           # ✅ Write JSON as multiline-safe output
@@ -148,11 +209,8 @@ jobs:
           set -euo pipefail
 
           PR_LINK="${{ github.event.pull_request.html_url }}"
-
-          # Build SOQL safely (PR_LINK will be URL-encoded by curl)
           SOQL="SELECT Id, PR_Reviewer__c, PR_Review_Comment__c FROM ${{ env.OBJECT_NAME }} WHERE PR_Link__c='${PR_LINK}' LIMIT 1"
 
-          # Call Salesforce query endpoint safely using -G + --data-urlencode
           RESPONSE=$(curl -sS -G "${{ env.DOMAIN_URL }}/services/data/v61.0/query" \
             -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json" \
@@ -161,7 +219,6 @@ jobs:
           echo "Raw Salesforce response:"
           echo "$RESPONSE"
 
-          # If Salesforce returned an error array, fail early with the message
           if [[ "$(echo "$RESPONSE" | jq -r 'type')" == "array" ]]; then
             echo "❌ Salesforce query failed:"
             echo "$RESPONSE" | jq -r '.[0].errorCode + ": " + .[0].message'
@@ -179,7 +236,7 @@ jobs:
       - name: Send PR Information to Salesforce (Create or Update)
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           prStatus="${{ steps.pr_status_check.outputs.PR_STATUS }}"
           mergedBy="${{ steps.pr_status_check.outputs.MERGED_BY }}"
@@ -189,7 +246,6 @@ jobs:
           newReviewer=""
           newComment=""
 
-          # Only review event has github.event.review.*
           if [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
             newReviewer="${{ github.event.review.user.login }}"
             newComment="${{ github.event.review.body }}"
@@ -232,7 +288,6 @@ jobs:
 
           CHECK_FIELDS_JSON='${{ steps.fetch_checks.outputs.SF_CHECK_FIELDS_JSON }}'
 
-          # ✅ SAFE MERGE (no jq quoting issues)
           PAYLOAD=$(echo "$BASE" | jq --argjson fields "$CHECK_FIELDS_JSON" '. + $fields')
 
           if [[ -n "$mergedBy" ]]; then
@@ -241,13 +296,13 @@ jobs:
 
           if [[ -n "$recordId" ]]; then
             echo "Updating existing PR record: $recordId"
-            RESPONSE=$(curl -s -X PATCH "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/$recordId" \
+            RESPONSE=$(curl -sS -X PATCH "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/$recordId" \
               -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
           else
             echo "Creating a new PR record"
-            RESPONSE=$(curl -s -X POST "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/" \
+            RESPONSE=$(curl -sS -X POST "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/" \
               -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
