@@ -7,7 +7,7 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, closed]
 
-  # ✅ Re-run when checks finish (so Open PR record updates)
+  # Re-run when checks finish (so Open PR record updates after checks complete)
   check_run:
     types: [completed]
 
@@ -28,7 +28,6 @@ jobs:
       DOMAIN_URL: ${{ vars.SF_DOMAIN_URL }}
       OBJECT_NAME: ${{ vars.SF_OBJECT_NAME }}
 
-      # ✅ GitHub Variables (NOT hardcoded)
       CHECK_NAMES: ${{ vars.CHECK_NAMES }}
       CHECK_ACTION_NAME_FIELDS: ${{ vars.CHECK_ACTION_NAME_FIELDS }}
       CHECK_ACTION_STATUS_FIELDS: ${{ vars.CHECK_ACTION_STATUS_FIELDS }}
@@ -58,9 +57,11 @@ jobs:
             PR_NUMBER=$(echo '${{ toJson(github.event.check_suite.pull_requests) }}' | jq -r '.[0].number // empty')
           fi
 
+          # If check_run/check_suite is not tied to a PR, do nothing
           if [[ -z "$PR_NUMBER" ]]; then
-            echo "❌ Could not determine PR number for event: ${{ github.event_name }}"
-            exit 1
+            echo "No PR context for event: ${{ github.event_name }}. Skipping."
+            echo "SKIP=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           PR_JSON=$(curl -sS \
@@ -83,6 +84,7 @@ jobs:
           PR_MERGED_BY=$(echo "$PR_JSON" | jq -r '.merged_by.login // ""')
           PR_HEAD_SHA=$(echo "$PR_JSON" | jq -r '.head.sha')
 
+          echo "SKIP=false" >> "$GITHUB_OUTPUT"
           echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "PR_TITLE=$PR_TITLE" >> "$GITHUB_OUTPUT"
           echo "PR_LINK=$PR_LINK" >> "$GITHUB_OUTPUT"
@@ -92,7 +94,12 @@ jobs:
           echo "PR_MERGED_BY=$PR_MERGED_BY" >> "$GITHUB_OUTPUT"
           echo "PR_HEAD_SHA=$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
 
+      - name: Stop if no PR context
+        if: steps.pr_ctx.outputs.SKIP == 'true'
+        run: echo "Skipping because event has no PR context."
+
       - name: Determine PR Status
+        if: steps.pr_ctx.outputs.SKIP != 'true'
         id: pr_status_check
         shell: bash
         run: |
@@ -130,6 +137,7 @@ jobs:
           echo "MERGED_BY=$MERGED_BY" >> "$GITHUB_OUTPUT"
 
       - name: Fetch check runs + map checks into SF fields (status + artifact)
+        if: steps.pr_ctx.outputs.SKIP != 'true'
         id: fetch_checks
         shell: bash
         run: |
@@ -164,15 +172,16 @@ jobs:
             exit 1
           fi
 
-          # Fetch check-runs (retry because GitHub sometimes returns 0 briefly)
+          # Fetch check-runs (retry because GitHub sometimes lags)
           CHECK_RUNS=""
-          for attempt in {1..6}; do
+          for attempt in {1..8}; do
             CHECK_RUNS=$(curl -sS \
               -H "Authorization: Bearer $TOKEN" \
               -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${REPO}/commits/${SHA}/check-runs")
+              "https://api.github.com/repos/${REPO}/commits/${SHA}/check-runs?per_page=100")
 
-            if [[ "$(echo "$CHECK_RUNS" | jq -r '.total_count // 0')" != "0" ]]; then
+            total=$(echo "$CHECK_RUNS" | jq -r '.total_count // 0')
+            if [[ "$total" != "0" ]]; then
               break
             fi
             sleep 5
@@ -180,6 +189,7 @@ jobs:
 
           echo "Total check_runs found: $(echo "$CHECK_RUNS" | jq -r '.total_count // 0')"
 
+          # Store all check names + derived statuses
           ALL_CHECK_NAMES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[]?.name' | paste -sd "," -)
           ALL_CHECK_STATUSES=$(echo "$CHECK_RUNS" | jq -r '
             .check_runs[]? |
@@ -197,10 +207,10 @@ jobs:
             statusField="${STATUS_FIELDS[$i]}"
             reportField="${REPORT_FIELDS[$i]}"
 
-            # ✅ FIX: pick the LATEST run for this check name
+            # ✅ IMPORTANT FIX: Always select the latest check_run by numeric ID
             run=$(echo "$CHECK_RUNS" | jq -c --arg n "$chk" '
               [ .check_runs[]? | select(.name==$n) ]
-              | sort_by(.completed_at // .started_at // .created_at)
+              | sort_by(.id)
               | last // empty
             ')
 
@@ -218,11 +228,12 @@ jobs:
                 derivedStatus="${concl:-unknown}"
               fi
 
+              # ✅ Artifact name (only works if details_url contains /actions/runs/<id>)
               runId=$(echo "$detailsUrl" | sed -n 's#.*\/actions\/runs\/\([0-9]\+\).*#\1#p' | head -n 1)
 
               if [[ -n "$runId" ]]; then
-                # ✅ Artifact API sometimes lags — retry a few times
-                for a in {1..6}; do
+                # Artifact API lags sometimes - retry
+                for a in {1..10}; do
                   ART_JSON=$(curl -sS \
                     -H "Authorization: Bearer $TOKEN" \
                     -H "Accept: application/vnd.github.v3+json" \
@@ -233,7 +244,7 @@ jobs:
                     artifactNames="$names"
                     break
                   fi
-                  sleep 5
+                  sleep 4
                 done
               fi
             fi
@@ -265,6 +276,7 @@ jobs:
           echo "$SF_CHECK_FIELDS_JSON"
 
       - name: Check if PR Record Exists in Salesforce
+        if: steps.pr_ctx.outputs.SKIP != 'true'
         id: check_existing_pr
         shell: bash
         run: |
@@ -293,6 +305,7 @@ jobs:
           echo "EXISTING_COMMENT=$EXISTING_COMMENT" >> "$GITHUB_OUTPUT"
 
       - name: Send PR Information to Salesforce (Create or Update)
+        if: steps.pr_ctx.outputs.SKIP != 'true'
         shell: bash
         run: |
           set -euo pipefail
