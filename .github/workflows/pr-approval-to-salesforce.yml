@@ -307,7 +307,7 @@ jobs:
           SOQL="SELECT Id, PR_Reviewer__c, PR_Review_Comment__c FROM ${{ env.OBJECT_NAME }} WHERE PR_Link__c='${PR_LINK}' LIMIT 1"
 
           RESPONSE=$(curl -sS -G "${{ env.DOMAIN_URL }}/services/data/v61.0/query" \
-            -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+            -H "Authorization: Bearer ${{ env.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json" \
             --data-urlencode "q=${SOQL}")
 
@@ -392,13 +392,13 @@ jobs:
           if [[ -n "$recordId" ]]; then
             echo "Updating existing PR record: $recordId"
             RESPONSE=$(curl -sS -X PATCH "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/$recordId" \
-              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+              -H "Authorization: Bearer ${{ env.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
           else
             echo "Creating a new PR record"
             RESPONSE=$(curl -sS -X POST "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/" \
-              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+              -H "Authorization: Bearer ${{ env.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
           fi
