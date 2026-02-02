@@ -150,7 +150,6 @@ jobs:
           cp scanner-report.csv "${REPORT_FILE}"
           echo "✅ Copied scanner-report.csv -> ${REPORT_FILE}"
 
-      # ✅ NEW: Commit & push report into Scanner_Reports branch under Artifact/
       - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
         if: always()
         shell: bash
@@ -163,6 +162,10 @@ jobs:
             echo "❌ GIT_TOKEN secret is missing. Add it in repo secrets."
             exit 1
           fi
+
+          # ✅ IMPORTANT FIX:
+          # Remove files that can block branch checkout (scanner-report.csv is the main one)
+          rm -f scanner-report.csv temp-scanner-report.csv changed_files.txt filtered_files.txt || true
 
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -192,9 +195,9 @@ jobs:
           echo "✅ Stored report at Artifact/${REPORT_FILE}"
 
           git add "Artifact/${REPORT_FILE}"
-
           git commit -m "🔄 Auto-update scanner report (${REPORT_FILE})" || echo "No changes to commit"
           git push origin "$BRANCH_NAME"
+
 
   quality-gate-critical-permissions-check:
     runs-on: ubuntu-latest
