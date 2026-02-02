@@ -10,12 +10,54 @@ jobs:
   quality-gate-code-check:
     runs-on: ubuntu-latest
     outputs:
-      scanner-report-path: ${{ steps.upload-report.outputs.artifact-path }}  # Outputs the artifact path to pass to the next job
-      block-pr: ${{ steps.block-check.outputs.block-status }}  # Pass the block status
+      block-pr: ${{ steps.block-check.outputs.block-status }}
+
     steps:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+
+      # ✅ Your exact step (kept as you provided)
+      - name: Get Repository and Branch Info
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO_NAME="$(echo "${GITHUB_REPOSITORY}" | cut -d'/' -f2)"
+          # ✅ Target branch for PRs (base branch)
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            TARGET_BRANCH="${GITHUB_BASE_REF}"
+            SOURCE_BRANCH="${GITHUB_HEAD_REF}"
+          else
+            TARGET_BRANCH="${GITHUB_REF#refs/heads/}"
+            SOURCE_BRANCH="${TARGET_BRANCH}"
+          fi
+          COMMIT_LABEL="$(git log -1 --pretty=format:'%s')"
+          echo "REPO_NAME=${REPO_NAME}" >> "$GITHUB_ENV"
+          echo "TARGET_BRANCH=${TARGET_BRANCH}" >> "$GITHUB_ENV"
+          echo "SOURCE_BRANCH=${SOURCE_BRANCH}" >> "$GITHUB_ENV"
+          echo "COMMIT_LABEL=${COMMIT_LABEL}" >> "$GITHUB_ENV"
+          FILE_TITLE="Code Scanner Report_${REPO_NAME}_${TARGET_BRANCH}_${COMMIT_LABEL}"
+          echo "Target Branch = ${TARGET_BRANCH}"
+          echo "Source Branch = ${SOURCE_BRANCH}"
+          echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
+
+      # ✅ Make filename SAFE + UNIQUE (timestamp + sha) using your FILE_TITLE
+      - name: Generate Unique Report File Name
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          # sanitize FILE_TITLE so it becomes a valid file name
+          SAFE_TITLE=$(echo "${FILE_TITLE}" | tr ' ' '_' | tr -cd 'A-Za-z0-9_.-')
+          SAFE_TITLE=$(echo "${SAFE_TITLE}" | cut -c1-120)
+
+          REPORT_FILE="${SAFE_TITLE}_${TIMESTAMP}_${SHORT_SHA}.csv"
+          echo "REPORT_FILE=${REPORT_FILE}" >> "$GITHUB_ENV"
+          echo "✅ REPORT_FILE=${REPORT_FILE}"
 
       - name: Use Node.js
         uses: actions/setup-node@v3
@@ -36,7 +78,9 @@ jobs:
 
       - name: Get changed files
         id: get-changes
+        shell: bash
         run: |
+          set -euo pipefail
           git fetch --unshallow || true
           if [ "$(git rev-list --count HEAD)" -gt "1" ]; then
             echo "Fetching changed files between HEAD~1 and HEAD"
@@ -48,24 +92,27 @@ jobs:
 
       - name: Run SFDX Scanner on All Changed Files
         id: run-scanner
+        shell: bash
         run: |
-          files=$(cat changed_files.txt | grep -E '\.cls$|\.lwc$' || true)
+          set -euo pipefail
+          files=$(cat changed_files.txt | grep -E '\.cls$|\.js$|\.html$|\.xml$' || true)
           echo "Files to scan: $files"
 
           rm -f scanner-report.csv
-          touch scanner-report.csv  # Create an empty file if no relevant files are found
+          touch scanner-report.csv
 
           if [ -n "$files" ]; then
             for file in $files; do
               echo "Running scanner on $file"
               sf scanner:run --target "$file" --format csv --outfile temp-scanner-report.csv || { echo "Scanner run failed on $file"; exit 1; }
+
               if [ -s scanner-report.csv ]; then
-                tail -n +2 temp-scanner-report.csv >> scanner-report.csv  # Skip header when appending
+                tail -n +2 temp-scanner-report.csv >> scanner-report.csv
               else
-                cat temp-scanner-report.csv >> scanner-report.csv  # Include header for the first file
+                cat temp-scanner-report.csv >> scanner-report.csv
               fi
             done
-            rm temp-scanner-report.csv
+            rm -f temp-scanner-report.csv
           else
             echo "No relevant files changed."
           fi
@@ -76,37 +123,38 @@ jobs:
 
       - name: Block PR merge if severity violations are found
         id: block-check
+        shell: bash
         run: |
+          set -euo pipefail
           if [ -f scanner-report.csv ]; then
             echo "Processing scanner-report.csv"
-            severity_fail_count=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count}' scanner-report.csv)
+            severity_fail_count=$(awk -F',' '{gsub(/^ *| *$/, "", $2); if($2 == "\"3\"") count++} END {print count+0}' scanner-report.csv)
             echo "Severity 3 issues count: $severity_fail_count"
+
             if [ "$severity_fail_count" -gt 0 ]; then
               echo "Blocking your pull request due to severity 3 vulnerabilities found."
-              echo "::set-output name=block-status::true"
+              echo "block-status=true" >> "$GITHUB_OUTPUT"
               exit 1
             else
               echo "No severity 3 vulnerabilities found. Proceeding with Approval."
-              echo "::set-output name=block-status::false"
+              echo "block-status=false" >> "$GITHUB_OUTPUT"
             fi
           else
             echo "No scanner report found."
+            echo "block-status=true" >> "$GITHUB_OUTPUT"
             exit 1
           fi
 
-      - name: Generate Unique File Name for Scanner Report
+      # ✅ Copy to your unique filename (REPORT_FILE)
+      - name: Rename Scanner Report File
         if: always()
+        shell: bash
         run: |
-          COMMIT_LABEL=$(git log -1 --pretty=format:'%s' | tr ' ' '_' | tr -cd 'A-Za-z0-9_.-')
-          REPORT_FILE="${COMMIT_LABEL}.csv"
+          set -euo pipefail
+          cp scanner-report.csv "${REPORT_FILE}"
+          echo "✅ Copied scanner-report.csv -> ${REPORT_FILE}"
 
-          echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
-          echo "✅ Generated unique file name: $REPORT_FILE"
-
-          # copy/rename the scanner report to unique name
-          cp scanner-report.csv "$REPORT_FILE"
-          echo "✅ Copied scanner-report.csv -> $REPORT_FILE"
-
+      # ✅ Upload artifact with same unique name
       - name: Upload Scanner Report
         id: upload-report
         if: always()
@@ -115,31 +163,32 @@ jobs:
           name: SFDX_Code_Scan_Report_${{ env.REPORT_FILE }}
           path: ${{ env.REPORT_FILE }}
 
-
   quality-gate-critical-permissions-check:
     runs-on: ubuntu-latest
     needs: quality-gate-code-check
-    if: ${{ needs.quality-gate-code-check.outputs.block-pr == 'false' }}  # Only run if the code scan passes
+    if: ${{ needs.quality-gate-code-check.outputs.block-pr == 'false' }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 2  # Ensures we get the previous commit for comparison
+          fetch-depth: 2
 
       - name: Get changed files
         id: changed-files
+        shell: bash
         run: |
-          # Get the list of changed files in the PR
+          set -euo pipefail
           git diff --name-only HEAD^ HEAD > changed_files.txt
-
-          # Ensure filtered_files.txt is created
           touch filtered_files.txt
-
-          # Filter profile and permission set files
-          grep -E 'force-app/main/default/(profiles|permissionsets)/.*\.(profile|permissionset)-meta\.xml' changed_files.txt > filtered_files.txt || echo "" > filtered_files.txt
+          grep -E 'force-app/main/default/(profiles|permissionsets)/.*\.(profile|permissionset)-meta\.xml' changed_files.txt > filtered_files.txt || true
+          echo "Filtered files:"
+          cat filtered_files.txt || true
 
       - name: Scan only changed Profiles and Permission Sets for Critical Permissions
+        shell: bash
         run: |
+          set -euo pipefail
           CRITICAL_PERMISSIONS=(
               "AssignPermissionSets"
               "AuthorApex"
@@ -162,28 +211,29 @@ jobs:
 
           BLOCKED_FILES=()
 
-          # Ensure filtered_files.txt exists before reading
-          if [ ! -f filtered_files.txt ]; then
+          if [ ! -s filtered_files.txt ]; then
             echo "No profile or permission set files were modified."
             exit 0
           fi
 
           while IFS= read -r FILE; do
-            [[ -z "$FILE" ]] && continue  # Skip empty lines
+            [[ -z "$FILE" ]] && continue
+            [[ ! -f "$FILE" ]] && continue
 
             for PERMISSION in "${CRITICAL_PERMISSIONS[@]}"; do
               if grep -q "$PERMISSION" "$FILE" && ! grep -q "System Administrator" "$FILE"; then
                 BLOCKED_FILES+=("$FILE")
+                break
               fi
             done
           done < filtered_files.txt
 
           if [ ${#BLOCKED_FILES[@]} -gt 0 ]; then
-            echo "Critical permissions found in the following modified files:"
+            echo "❌ Critical permissions found in the following modified files:"
             for FILE in "${BLOCKED_FILES[@]}"; do
               echo "$FILE"
             done
-            exit 1  # Fail the job
+            exit 1
           else
-            echo "No critical permissions found in modified files."
+            echo "✅ No critical permissions found in modified files."
           fi
