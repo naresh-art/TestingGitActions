@@ -37,6 +37,27 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Authenticate with Salesforce
+        id: sf-auth
+        run: |
+          response=$(curl -X POST "https://login.salesforce.com/services/oauth2/token" \
+            -d "grant_type=password" \
+            -d "client_id=${{ secrets.SF_CLIENT_ID }}" \
+            -d "client_secret=${{ secrets.SF_CLIENT_SECRET }}" \
+            -d "username=${{ secrets.SF_USERNAME }}" \
+            -d "password=${{ secrets.SF_PASSWORD }}${{ secrets.SF_SECURITY_TOKEN }}" )
+          echo "Login response: $response"
+          
+          SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
+          INSTANCE_URL=$(echo "$response" | jq -r '.instance_url')
+          if [[ -z "$SF_ACCESS_TOKEN" || "$SF_ACCESS_TOKEN" == "null" ]]; then
+            echo "❌ Salesforce authentication failed."
+            exit 1
+          fi
+          echo "✅ Salesforce Authenticated Successfully"
+          echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
+          echo "INSTANCE_URL=$INSTANCE_URL" >> $GITHUB_ENV
+
       # ✅ Get PR context for ALL event types (pull_request / review / check_run / check_suite)
       - name: Load PR Context
         id: pr_ctx
@@ -286,7 +307,7 @@ jobs:
           SOQL="SELECT Id, PR_Reviewer__c, PR_Review_Comment__c FROM ${{ env.OBJECT_NAME }} WHERE PR_Link__c='${PR_LINK}' LIMIT 1"
 
           RESPONSE=$(curl -sS -G "${{ env.DOMAIN_URL }}/services/data/v61.0/query" \
-            -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+            -H "Authorization: Bearer ${{ env.SF_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json" \
             --data-urlencode "q=${SOQL}")
 
@@ -371,13 +392,13 @@ jobs:
           if [[ -n "$recordId" ]]; then
             echo "Updating existing PR record: $recordId"
             RESPONSE=$(curl -sS -X PATCH "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/$recordId" \
-              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+              -H "Authorization: Bearer ${{ env.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
           else
             echo "Creating a new PR record"
             RESPONSE=$(curl -sS -X POST "${{ env.DOMAIN_URL }}/services/data/v61.0/sobjects/${{ env.OBJECT_NAME }}/" \
-              -H "Authorization: Bearer ${{ secrets.SF_ACCESS_TOKEN }}" \
+              -H "Authorization: Bearer ${{ env.SF_ACCESS_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD")
           fi
