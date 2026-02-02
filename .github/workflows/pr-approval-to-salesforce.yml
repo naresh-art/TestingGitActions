@@ -163,86 +163,68 @@ jobs:
           echo "MERGED_BY=$MERGED_BY" >> "$GITHUB_OUTPUT"
 
       # ✅ NEW STEP: Read latest CSV from Scanner_Reports branch path Artifact/
-      - name: Get Latest Report File from Scanner_Reports Path (by last commit date)
+      - name: Get Latest Report File from Scanner_Reports Path
         if: steps.pr_ctx.outputs.SKIP != 'true'
         id: latest_report
         shell: bash
         run: |
           set -euo pipefail
 
+          REPO="${{ github.repository }}"
+          TOKEN="${{ secrets.GITHUB_TOKEN }}"
           BRANCH="${{ env.SCANNER_REPORTS_BRANCH }}"
           DIR="${{ env.SCANNER_REPORTS_DIR }}"
           PR_SHA="${{ steps.pr_ctx.outputs.PR_HEAD_SHA }}"
           SHORT_SHA="$(echo "$PR_SHA" | cut -c1-7)"
 
-          echo "Fetching branch: $BRANCH"
-          git fetch origin "$BRANCH":"refs/remotes/origin/$BRANCH" --prune
+          echo "Looking in branch=$BRANCH dir=$DIR for sha=$SHORT_SHA"
 
-          # Work in detached state (no local changes)
-          git checkout --detach "origin/$BRANCH"
+          URL="https://api.github.com/repos/${REPO}/contents/${DIR}?ref=${BRANCH}"
+          RESP="$(curl -sS \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "$URL")"
 
-          if [[ ! -d "$DIR" ]]; then
-            echo "❌ Directory not found: $DIR"
-            echo "REPORT_FILE_NAME=" >> "$GITHUB_OUTPUT"
-            echo "REPORT_FILE_PATH=" >> "$GITHUB_OUTPUT"
-            exit 0
+          # Validate JSON
+          if ! echo "$RESP" | jq -e . >/dev/null 2>&1; then
+            echo "❌ Invalid JSON from GitHub API:"
+            echo "$RESP"
+            exit 1
           fi
 
-          mapfile -t CSV_FILES < <(find "$DIR" -maxdepth 1 -type f -name "*.csv" -printf "%f\n" | sort)
+          # If API returned an error object
+          TYPE="$(echo "$RESP" | jq -r 'type')"
+          if [[ "$TYPE" != "array" ]]; then
+            MSG="$(echo "$RESP" | jq -r '.message // empty')"
+            echo "❌ GitHub contents API error: ${MSG:-unknown}"
+            echo "$RESP"
+            exit 1
+          fi
 
-          if [[ ${#CSV_FILES[@]} -eq 0 ]]; then
+          # List all csv files
+          ALL_CSV="$(echo "$RESP" | jq -r '.[] | select(.type=="file") | .name' | grep -E '\.csv$' || true)"
+
+          if [[ -z "$ALL_CSV" ]]; then
             echo "❌ No CSV files found in ${BRANCH}/${DIR}"
             echo "REPORT_FILE_NAME=" >> "$GITHUB_OUTPUT"
             echo "REPORT_FILE_PATH=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "Found ${#CSV_FILES[@]} csv files in ${DIR}"
+          # Prefer files that contain the PR short sha (your delta scan ends with _<shortsha>.csv)
+          MATCHED="$(echo "$ALL_CSV" | grep -F "_${SHORT_SHA}.csv" || true)"
 
-          # Prefer files that contain the PR short sha (if your naming includes it)
-          MATCHED_FILES=()
-          for f in "${CSV_FILES[@]}"; do
-            if [[ "$f" == *"_${SHORT_SHA}.csv"* ]]; then
-              MATCHED_FILES+=("$f")
-            fi
-          done
-
-          pick_latest_by_commit() {
-            local -n arr=$1
-            local best_file=""
-            local best_ts=0
-
-            for f in "${arr[@]}"; do
-              ts=$(git log -1 --format=%ct -- "${DIR}/${f}" 2>/dev/null || echo 0)
-              # echo "debug: $f ts=$ts"
-              if [[ "$ts" -gt "$best_ts" ]]; then
-                best_ts="$ts"
-                best_file="$f"
-              fi
-            done
-
-            echo "$best_file"
-          }
-
-          if [[ ${#MATCHED_FILES[@]} -gt 0 ]]; then
-            echo "✅ SHA matched files count: ${#MATCHED_FILES[@]}"
-            LATEST_FILE="$(pick_latest_by_commit MATCHED_FILES)"
+          if [[ -n "$MATCHED" ]]; then
+            # timestamp naming lets lexicographic sort work
+            LATEST_FILE="$(echo "$MATCHED" | sort | tail -n 1)"
           else
-            echo "No SHA matched files. Falling back to latest-by-commit in folder."
-            LATEST_FILE="$(pick_latest_by_commit CSV_FILES)"
+            # fallback to latest overall
+            LATEST_FILE="$(echo "$ALL_CSV" | sort | tail -n 1)"
           fi
 
-          if [[ -z "$LATEST_FILE" ]]; then
-            echo "❌ Could not determine latest file."
-            echo "REPORT_FILE_NAME=" >> "$GITHUB_OUTPUT"
-            echo "REPORT_FILE_PATH=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "✅ Latest report file (by last commit): $LATEST_FILE"
+          echo "✅ Latest report file: $LATEST_FILE"
           echo "REPORT_FILE_NAME=$LATEST_FILE" >> "$GITHUB_OUTPUT"
           echo "REPORT_FILE_PATH=${DIR}/${LATEST_FILE}" >> "$GITHUB_OUTPUT"
-
 
       - name: Fetch check runs + map checks into SF fields (status + report file from path)
         if: steps.pr_ctx.outputs.SKIP != 'true'
