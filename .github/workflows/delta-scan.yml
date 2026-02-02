@@ -150,15 +150,6 @@ jobs:
           cp scanner-report.csv "${REPORT_FILE}"
           echo "✅ Copied scanner-report.csv -> ${REPORT_FILE}"
 
-      # ✅ Upload artifact with unique name
-      - name: Upload Scanner Report
-        id: upload-report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.REPORT_FILE }}
-          path: ${{ env.REPORT_FILE }}
-
       # ✅ NEW: Commit & push report into Scanner_Reports branch under Artifact/
       - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
         if: always()
