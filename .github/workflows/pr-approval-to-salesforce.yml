@@ -261,21 +261,10 @@ jobs:
                     "https://api.github.com/repos/${REPO}/actions/runs/${runId}/artifacts")
 
                   names=$(echo "$ART_JSON" | jq -r '.artifacts[]?.name' | paste -sd "," -)
-
-                    if [[ -n "$names" ]]; then
-                      # ✅ Prepend "-" to each artifact filename
-                      artifactNames=$(echo "$names" | awk -F',' '
-                        {
-                          for (i=1; i<=NF; i++) {
-                            gsub(/^[ \t]+|[ \t]+$/, "", $i)
-                            $i="-"$i
-                          }
-                          OFS=","; print
-                        }'
-                      )
-                      break
-                    fi
-
+                  if [[ -n "$names" ]]; then
+                    artifactNames="$names"
+                    break
+                  fi
                   sleep 4
                 done
               fi
