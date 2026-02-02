@@ -94,13 +94,27 @@ jobs:
             exit 1
           fi
 
+      - name: Generate Unique File Name for Scanner Report
+        if: always()
+        run: |
+          COMMIT_LABEL=$(git log -1 --pretty=format:'%s' | tr ' ' '_' | tr -cd 'A-Za-z0-9_.-')
+          REPORT_FILE="${COMMIT_LABEL}.csv"
+
+          echo "REPORT_FILE=$REPORT_FILE" >> $GITHUB_ENV
+          echo "✅ Generated unique file name: $REPORT_FILE"
+
+          # copy/rename the scanner report to unique name
+          cp scanner-report.csv "$REPORT_FILE"
+          echo "✅ Copied scanner-report.csv -> $REPORT_FILE"
+
       - name: Upload Scanner Report
         id: upload-report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SFDX_Code_Scan_Report
-          path: scanner-report.csv
+          name: SFDX_Code_Scan_Report_${{ env.REPORT_FILE }}
+          path: ${{ env.REPORT_FILE }}
+
 
   quality-gate-critical-permissions-check:
     runs-on: ubuntu-latest
