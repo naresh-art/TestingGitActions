@@ -20,13 +20,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ✅ Your exact step (as you provided)
       - name: Get Repository and Branch Info
         shell: bash
         run: |
           set -euo pipefail
           REPO_NAME="$(echo "${GITHUB_REPOSITORY}" | cut -d'/' -f2)"
-          # ✅ Target branch for PRs (base branch)
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             TARGET_BRANCH="${GITHUB_BASE_REF}"
             SOURCE_BRANCH="${GITHUB_HEAD_REF}"
@@ -44,7 +42,6 @@ jobs:
           echo "Source Branch = ${SOURCE_BRANCH}"
           echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
 
-      # ✅ Make filename SAFE + UNIQUE (timestamp + sha) using your FILE_TITLE
       - name: Generate Unique Report File Name
         if: always()
         shell: bash
@@ -141,7 +138,6 @@ jobs:
             exit 1
           fi
 
-      # ✅ Rename to your unique filename (REPORT_FILE)
       - name: Rename Scanner Report File
         if: always()
         shell: bash
@@ -150,7 +146,7 @@ jobs:
           cp scanner-report.csv "${REPORT_FILE}"
           echo "✅ Copied scanner-report.csv -> ${REPORT_FILE}"
 
-      # ✅ Upload artifact with unique name
+      # (You can keep this if you want, it doesn't affect the branch-path logic)
       - name: Upload Scanner Report
         id: upload-report
         if: always()
@@ -159,6 +155,7 @@ jobs:
           name: ${{ env.REPORT_FILE }}
           path: ${{ env.REPORT_FILE }}
 
+      # ✅ UPDATED: removed Artifact folder, store in fixed PATH folder in Scanner_Reports branch
       - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
         if: always()
         shell: bash
@@ -172,8 +169,6 @@ jobs:
             exit 1
           fi
 
-          # ✅ IMPORTANT FIX:
-          # Remove files that can block branch checkout (scanner-report.csv is the main one)
           rm -f scanner-report.csv temp-scanner-report.csv changed_files.txt filtered_files.txt || true
 
           git config --global user.name "github-actions[bot]"
@@ -182,12 +177,9 @@ jobs:
           BRANCH_NAME="Scanner_Reports"
           echo "✅ Target Branch: $BRANCH_NAME"
 
-          # ✅ Use PAT for pushing
           git remote set-url origin "https://x-access-token:${GIT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-
           git fetch origin "+refs/heads/*:refs/remotes/origin/*"
 
-          # ✅ Checkout or create branch
           if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
             echo "✅ Remote branch $BRANCH_NAME exists."
             git checkout -B "$BRANCH_NAME" "origin/$BRANCH_NAME"
@@ -199,11 +191,13 @@ jobs:
             git push -u origin "$BRANCH_NAME"
           fi
 
-          mkdir -p Artifact
-          cp "${REPORT_FILE}" "Artifact/${REPORT_FILE}"
-          echo "✅ Stored report at Artifact/${REPORT_FILE}"
+          # ✅ PATH folder (no Artifact)
+          REPORT_DIR="ScannerReports"
+          mkdir -p "$REPORT_DIR"
+          cp "${REPORT_FILE}" "${REPORT_DIR}/${REPORT_FILE}"
+          echo "✅ Stored report at ${REPORT_DIR}/${REPORT_FILE}"
 
-          git add "Artifact/${REPORT_FILE}"
+          git add "${REPORT_DIR}/${REPORT_FILE}"
           git commit -m "🔄 Auto-update scanner report (${REPORT_FILE})" || echo "No changes to commit"
           git push origin "$BRANCH_NAME"
 

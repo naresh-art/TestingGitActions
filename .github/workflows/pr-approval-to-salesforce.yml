@@ -7,7 +7,6 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, closed]
 
-  # Re-run when checks finish (so Open PR record updates after checks complete)
   check_run:
     types: [completed]
 
@@ -47,7 +46,7 @@ jobs:
             -d "username=${{ secrets.SF_USERNAME }}" \
             -d "password=${{ secrets.SF_PASSWORD }}${{ secrets.SF_SECURITY_TOKEN }}" )
           echo "Login response: $response"
-          
+
           SF_ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
           INSTANCE_URL=$(echo "$response" | jq -r '.instance_url')
           if [[ -z "$SF_ACCESS_TOKEN" || "$SF_ACCESS_TOKEN" == "null" ]]; then
@@ -58,7 +57,6 @@ jobs:
           echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> $GITHUB_ENV
           echo "INSTANCE_URL=$INSTANCE_URL" >> $GITHUB_ENV
 
-      # ✅ Get PR context for ALL event types (pull_request / review / check_run / check_suite)
       - name: Load PR Context
         id: pr_ctx
         shell: bash
@@ -78,7 +76,6 @@ jobs:
             PR_NUMBER=$(echo '${{ toJson(github.event.check_suite.pull_requests) }}' | jq -r '.[0].number // empty')
           fi
 
-          # If check_run/check_suite is not tied to a PR, do nothing
           if [[ -z "$PR_NUMBER" ]]; then
             echo "No PR context for event: ${{ github.event_name }}. Skipping."
             echo "SKIP=true" >> "$GITHUB_OUTPUT"
@@ -100,8 +97,8 @@ jobs:
           PR_TITLE=$(echo "$PR_JSON" | jq -r '.title')
           PR_LINK=$(echo "$PR_JSON" | jq -r '.html_url')
           PR_AUTHOR=$(echo "$PR_JSON" | jq -r '.user.login')
-          PR_STATE=$(echo "$PR_JSON" | jq -r '.state')               # open/closed
-          PR_MERGED=$(echo "$PR_JSON" | jq -r '.merged')             # true/false
+          PR_STATE=$(echo "$PR_JSON" | jq -r '.state')
+          PR_MERGED=$(echo "$PR_JSON" | jq -r '.merged')
           PR_MERGED_BY=$(echo "$PR_JSON" | jq -r '.merged_by.login // ""')
           PR_HEAD_SHA=$(echo "$PR_JSON" | jq -r '.head.sha')
 
@@ -157,6 +154,39 @@ jobs:
           echo "PR_STATUS=$PR_STATUS" >> "$GITHUB_OUTPUT"
           echo "MERGED_BY=$MERGED_BY" >> "$GITHUB_OUTPUT"
 
+      # ✅ NEW: Get latest CSV file name from Scanner_Reports branch path (ScannerReports/)
+      - name: Get Latest Report File from Scanner_Reports Path
+        if: steps.pr_ctx.outputs.SKIP != 'true'
+        id: latest_report
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          BRANCH="Scanner_Reports"
+          DIR="ScannerReports"
+
+          # List directory contents in Scanner_Reports branch
+          JSON=$(curl -sS \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${REPO}/contents/${DIR}?ref=${BRANCH}")
+
+          # Pick latest by filename sort (works because your name has TIMESTAMP + SHA)
+          LATEST_FILE=$(echo "$JSON" | jq -r '[.[] | select(.type=="file") | select(.name | endswith(".csv")) | .name] | sort | last // empty')
+
+          if [[ -z "$LATEST_FILE" ]]; then
+            echo "❌ No CSV found in ${BRANCH}:${DIR}"
+            echo "LATEST_FOUND=false" >> "$GITHUB_OUTPUT"
+            echo "LATEST_FILE=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "✅ Latest report found: $LATEST_FILE"
+          echo "LATEST_FOUND=true" >> "$GITHUB_OUTPUT"
+          echo "LATEST_FILE=$LATEST_FILE" >> "$GITHUB_OUTPUT"
+          echo "LATEST_PATH=${DIR}/${LATEST_FILE}" >> "$GITHUB_OUTPUT"
+
       - name: Fetch check runs + map checks into SF fields (status + artifact)
         if: steps.pr_ctx.outputs.SKIP != 'true'
         id: fetch_checks
@@ -193,7 +223,6 @@ jobs:
             exit 1
           fi
 
-          # Fetch check-runs (retry because GitHub sometimes lags)
           CHECK_RUNS=""
           for attempt in {1..8}; do
             CHECK_RUNS=$(curl -sS \
@@ -210,7 +239,6 @@ jobs:
 
           echo "Total check_runs found: $(echo "$CHECK_RUNS" | jq -r '.total_count // 0')"
 
-          # Store all check names + derived statuses
           ALL_CHECK_NAMES=$(echo "$CHECK_RUNS" | jq -r '.check_runs[]?.name' | paste -sd "," -)
           ALL_CHECK_STATUSES=$(echo "$CHECK_RUNS" | jq -r '
             .check_runs[]? |
@@ -222,13 +250,16 @@ jobs:
 
           SF_CHECK_FIELDS_JSON="{}"
 
+          # ✅ Latest file name from path (ScannerReports/)
+          LATEST_FOUND="${{ steps.latest_report.outputs.LATEST_FOUND }}"
+          LATEST_FILE="${{ steps.latest_report.outputs.LATEST_FILE }}"
+
           for i in "${!CHECK_LIST[@]}"; do
             chk="${CHECK_LIST[$i]}"
             nameField="${NAME_FIELDS[$i]}"
             statusField="${STATUS_FIELDS[$i]}"
             reportField="${REPORT_FIELDS[$i]}"
 
-            # ✅ IMPORTANT FIX: Always select the latest check_run by numeric ID
             run=$(echo "$CHECK_RUNS" | jq -c --arg n "$chk" '
               [ .check_runs[]? | select(.name==$n) ]
               | sort_by(.id)
@@ -241,7 +272,6 @@ jobs:
             if [[ -n "$run" && "$run" != "null" ]]; then
               st=$(echo "$run" | jq -r '.status // "unknown"')
               concl=$(echo "$run" | jq -r '.conclusion // empty')
-              detailsUrl=$(echo "$run" | jq -r '.details_url // empty')
 
               if [[ "$st" != "completed" ]]; then
                 derivedStatus="$st"
@@ -249,28 +279,15 @@ jobs:
                 derivedStatus="${concl:-unknown}"
               fi
 
-              # ✅ Artifact name (only works if details_url contains /actions/runs/<id>)
-              runId=$(echo "$detailsUrl" | sed -n 's#.*\/actions\/runs\/\([0-9]\+\).*#\1#p' | head -n 1)
-
-              if [[ -n "$runId" ]]; then
-                # Artifact API lags sometimes - retry
-                for a in {1..10}; do
-                  ART_JSON=$(curl -sS \
-                    -H "Authorization: Bearer $TOKEN" \
-                    -H "Accept: application/vnd.github.v3+json" \
-                    "https://api.github.com/repos/${REPO}/actions/runs/${runId}/artifacts")
-
-                  names=$(echo "$ART_JSON" | jq -r '.artifacts[]?.name' | paste -sd "," -)
-                  if [[ -n "$names" ]]; then
-                    artifactNames="$names"
-                    break
-                  fi
-                  sleep 4
-                done
+              # ✅ REPLACED: no artifacts API. Use latest file from path.
+              if [[ "$LATEST_FOUND" == "true" ]]; then
+                artifactNames="$LATEST_FILE"
+              else
+                artifactNames=""
               fi
             fi
 
-            echo "Mapped: $chk -> status=$derivedStatus artifact=${artifactNames:-<null>}"
+            echo "Mapped: $chk -> status=$derivedStatus reportFile=${artifactNames:-<null>}"
 
             if [[ -n "$artifactNames" ]]; then
               SF_CHECK_FIELDS_JSON=$(echo "$SF_CHECK_FIELDS_JSON" | jq \
