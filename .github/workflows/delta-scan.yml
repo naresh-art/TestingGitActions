@@ -39,26 +39,27 @@ jobs:
           echo "TARGET_BRANCH=${TARGET_BRANCH}" >> "$GITHUB_ENV"
           echo "SOURCE_BRANCH=${SOURCE_BRANCH}" >> "$GITHUB_ENV"
           echo "COMMIT_LABEL=${COMMIT_LABEL}" >> "$GITHUB_ENV"
-          FILE_TITLE="Code Scanner Report_${REPO_NAME}_${TARGET_BRANCH}_${COMMIT_LABEL}"
+          SAFE_TITLE=$(echo "${COMMIT_LABEL}" | tr ' ' '_' | tr -cd 'A-Za-z0-9_.-')
+          FILE_TITLE="Code Scanner Report_${REPO_NAME}_${TARGET_BRANCH}_${SAFE_TITLE}"
           echo "Target Branch = ${TARGET_BRANCH}"
           echo "Source Branch = ${SOURCE_BRANCH}"
           echo "FILE_TITLE=${FILE_TITLE}" >> $GITHUB_ENV
 
       # ✅ Make filename SAFE + UNIQUE (timestamp + sha) using your FILE_TITLE
-      - name: Generate Unique Report File Name
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
-          SHORT_SHA=$(git rev-parse --short HEAD)
+      # - name: Generate Unique Report File Name
+      #   if: always()
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     TIMESTAMP=$(date +'%Y%m%d-%H%M%S')
+      #     SHORT_SHA=$(git rev-parse --short HEAD)
 
-          SAFE_TITLE=$(echo "${FILE_TITLE}" | tr ' ' '_' | tr -cd 'A-Za-z0-9_.-')
-          SAFE_TITLE=$(echo "${SAFE_TITLE}" | cut -c1-120)
+      #     SAFE_TITLE=$(echo "${FILE_TITLE}" | tr ' ' '_' | tr -cd 'A-Za-z0-9_.-')
+      #     SAFE_TITLE=$(echo "${SAFE_TITLE}" | cut -c1-120)
 
-          REPORT_FILE="${SAFE_TITLE}_${TIMESTAMP}_${SHORT_SHA}.csv"
-          echo "REPORT_FILE=${REPORT_FILE}" >> "$GITHUB_ENV"
-          echo "✅ REPORT_FILE=${REPORT_FILE}"
+      #     FILE_TITLE="${SAFE_TITLE}_${TIMESTAMP}_${SHORT_SHA}.csv"
+      #     echo "FILE_TITLE=${FILE_TITLE}" >> "$GITHUB_ENV"
+      #     echo "✅ FILE_TITLE=${FILE_TITLE}"
 
       - name: Use Node.js
         uses: actions/setup-node@v3
@@ -141,14 +142,14 @@ jobs:
             exit 1
           fi
 
-      # ✅ Rename to your unique filename (REPORT_FILE)
+      # ✅ Rename to your unique filename (FILE_TITLE)
       - name: Rename Scanner Report File
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          cp scanner-report.csv "${REPORT_FILE}"
-          echo "✅ Copied scanner-report.csv -> ${REPORT_FILE}"
+          cp scanner-report.csv "${FILE_TITLE}"
+          echo "✅ Copied scanner-report.csv -> ${FILE_TITLE}"
 
       # ✅ Upload artifact with unique name
       - name: Upload Scanner Report
@@ -156,8 +157,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.REPORT_FILE }}
-          path: ${{ env.REPORT_FILE }}
+          name: ${{ env.FILE_TITLE }}
+          path: ${{ env.FILE_TITLE }}
 
       - name: Commit and Push Scanner Report to `Scanner_Reports` Branch
         if: always()
@@ -200,11 +201,11 @@ jobs:
           fi
 
           mkdir -p Artifact
-          cp "${REPORT_FILE}" "Artifact/${REPORT_FILE}"
-          echo "✅ Stored report at Artifact/${REPORT_FILE}"
+          cp "${FILE_TITLE}" "Artifact/${FILE_TITLE}"
+          echo "✅ Stored report at Artifact/${FILE_TITLE}"
 
-          git add "Artifact/${REPORT_FILE}"
-          git commit -m "🔄 Auto-update scanner report (${REPORT_FILE})" || echo "No changes to commit"
+          git add "Artifact/${FILE_TITLE}"
+          git commit -m "🔄 Auto-update scanner report (${FILE_TITLE})" || echo "No changes to commit"
           git push origin "$BRANCH_NAME"
 
   quality-gate-critical-permissions-check:
