@@ -232,9 +232,10 @@ jobs:
           git -C "$ROOT" clean -fd
 
           BASE_FILES=$(git -C "$ROOT" ls-tree -r --name-only "origin/$BRANCH" "$REPORTS_DIR" \
-            | grep -E '\.csv$' \
+            | grep -E "^${REPORTS_DIR}/Code Scanner Report_" \
             | sed "s#^${REPORTS_DIR}/##" \
             || true)
+
 
           FILE_COUNT=$(echo "$BASE_FILES" | sed '/^\s*$/d' | wc -l | tr -d ' ')
           if [[ "$FILE_COUNT" -lt 1 ]]; then
@@ -257,7 +258,7 @@ jobs:
             git -C "$ROOT" clean -fd
 
             ALL_FILES=$(git -C "$ROOT" ls-tree -r --name-only "origin/$BRANCH" "$REPORTS_DIR" \
-              | grep -E '\.csv$' \
+              | grep -E "^${REPORTS_DIR}/Code Scanner Report_" \
               | sed "s#^${REPORTS_DIR}/##" \
               || true)
 
