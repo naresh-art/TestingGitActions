@@ -1,11 +1,6 @@
 name: PR Approval & Merge Tracking
 
 on:
-  workflow_run:
-    workflows:
-      - "Salesforce Code Scan and Critical Permissions Check on Pull Request"
-    types: [completed]
-
   pull_request_review:
     types: [submitted]
 
@@ -70,7 +65,7 @@ jobs:
           echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> "$GITHUB_ENV"
           echo "INSTANCE_URL=$INSTANCE_URL" >> "$GITHUB_ENV"
 
-      # ✅ Load PR Context + compute SCAN_SHA (critical fix)
+      # ✅ Get PR context for ALL event types (pull_request / review / check_run / check_suite)
       - name: Load PR Context
         id: pr_ctx
         shell: bash
@@ -81,7 +76,6 @@ jobs:
           TOKEN="${{ secrets.GITHUB_TOKEN }}"
 
           PR_NUMBER=""
-          SCAN_SHA=""
 
           if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "pull_request_review" ]]; then
             PR_NUMBER="${{ github.event.pull_request.number }}"
@@ -89,9 +83,6 @@ jobs:
             PR_NUMBER=$(echo '${{ toJson(github.event.check_run.check_suite.pull_requests) }}' | jq -r '.[0].number // empty')
           elif [[ "${{ github.event_name }}" == "check_suite" ]]; then
             PR_NUMBER=$(echo '${{ toJson(github.event.check_suite.pull_requests) }}' | jq -r '.[0].number // empty')
-          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            PR_NUMBER=$(echo '${{ toJson(github.event.workflow_run.pull_requests) }}' | jq -r '.[0].number // empty')
-            SCAN_SHA="${{ github.event.workflow_run.head_sha }}"
           fi
 
           if [[ -z "$PR_NUMBER" ]]; then
@@ -118,12 +109,9 @@ jobs:
           PR_STATE=$(echo "$PR_JSON" | jq -r '.state')
           PR_MERGED=$(echo "$PR_JSON" | jq -r '.merged')
           PR_MERGED_BY=$(echo "$PR_JSON" | jq -r '.merged_by.login // ""')
-          PR_HEAD_SHA=$(echo "$PR_JSON" | jq -r '.head.sha')
 
-          # ✅ If not workflow_run, use current PR head SHA for scan sha
-          if [[ -z "$SCAN_SHA" ]]; then
-            SCAN_SHA="$PR_HEAD_SHA"
-          fi
+          PR_HEAD_SHA=$(echo "$PR_JSON" | jq -r '.head.sha')
+          PR_BASE_SHA=$(echo "$PR_JSON" | jq -r '.base.sha')
 
           echo "SKIP=false" >> "$GITHUB_OUTPUT"
           echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_OUTPUT"
@@ -134,11 +122,7 @@ jobs:
           echo "PR_MERGED=$PR_MERGED" >> "$GITHUB_OUTPUT"
           echo "PR_MERGED_BY=$PR_MERGED_BY" >> "$GITHUB_OUTPUT"
           echo "PR_HEAD_SHA=$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
-          echo "SCAN_SHA=$SCAN_SHA" >> "$GITHUB_OUTPUT"
-
-          echo "✅ PR #$PR_NUMBER"
-          echo "✅ PR_HEAD_SHA=$PR_HEAD_SHA"
-          echo "✅ SCAN_SHA=$SCAN_SHA"
+          echo "PR_BASE_SHA=$PR_BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Stop if no PR context
         if: steps.pr_ctx.outputs.SKIP == 'true'
@@ -182,7 +166,7 @@ jobs:
           echo "PR_STATUS=$PR_STATUS" >> "$GITHUB_OUTPUT"
           echo "MERGED_BY=$MERGED_BY" >> "$GITHUB_OUTPUT"
 
-      # ✅ Checkout Scanner_Reports branch
+      # ✅ Checkout Scanner_Reports branch (we need git log per file)
       - name: Checkout Scanner_Reports branch (for report lookup)
         if: steps.pr_ctx.outputs.SKIP != 'true'
         uses: actions/checkout@v4
@@ -191,8 +175,8 @@ jobs:
           fetch-depth: 0
           path: scanner_reports
 
-      # ✅ Find report file for THIS scan commit (SCAN_SHA)
-      - name: Get Delta Report File for this PR (strict sha match + wait)
+      # ✅ FIXED: Find the delta report for THIS PR (match by HEAD sha, not the wrong sha)
+      - name: Get Delta Report File for this PR (fixed sha + fixed path + wait)
         if: steps.pr_ctx.outputs.SKIP != 'true'
         id: latest_report
         shell: bash
@@ -200,69 +184,127 @@ jobs:
           set -euo pipefail
 
           ROOT="scanner_reports"
-          REPORTS_DIR="${{ env.SCANNER_REPORTS_DIR }}"
-          FULL_DIR="${ROOT}/${REPORTS_DIR}"
+          DIR="${{ env.SCANNER_REPORTS_DIR }}"           # Artifact
+          REPO_NAME="${{ github.event.repository.name }}" # TestingGitActions
 
-          if [[ ! -d "$FULL_DIR" ]]; then
-            echo "❌ Folder not found: $FULL_DIR"
-            echo "REPORT_FILE_NAME=" >> "$GITHUB_OUTPUT"
-            echo "REPORT_FILE_PATH=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          # Candidate folders (support both)
+          CANDIDATES=(
+            "${ROOT}/${DIR}"
+            "${ROOT}/${REPO_NAME}/${DIR}"
+          )
 
-          SCAN_SHA="${{ steps.pr_ctx.outputs.SCAN_SHA }}"
-          SHORT_SHA="$(echo "$SCAN_SHA" | cut -c1-7)"
+          HEAD_SHA="${{ steps.pr_ctx.outputs.PR_HEAD_SHA }}"
+          BASE_SHA="${{ steps.pr_ctx.outputs.PR_BASE_SHA }}"
+          HEAD_SHORT="$(echo "$HEAD_SHA" | cut -c1-7)"
+          BASE_SHORT="$(echo "$BASE_SHA" | cut -c1-7)"
 
-          echo "🔎 Need report containing: ${SHORT_SHA}"
-          echo "🔎 Searching in: ${FULL_DIR}"
+          echo "Need report for PR head sha: $HEAD_SHORT (base: $BASE_SHORT)"
+          echo "Searching in branch folder(s):"
+          printf " - %s\n" "${CANDIDATES[@]}"
 
-          found=""
+          # helper: pick latest file by git commit time
+          pick_latest_by_git_time () {
+            local folder="$1"
+            shift
+            local -a files=("$@")
 
-          for attempt in {1..12}; do
-            mapfile -t ALL_FILES < <(find "$FULL_DIR" -maxdepth 1 -type f -name "*.csv" -printf "%f\n" | sort || true)
+            local best=""
+            local bestTs=0
 
-            matches=()
-            for f in "${ALL_FILES[@]}"; do
-              # ✅ contains merge SHA or into SHA etc. (just ensure it contains SHORT_SHA anywhere)
-              if [[ "$f" == *"${SHORT_SHA}"* ]]; then
-                matches+=("$f")
+            for f in "${files[@]}"; do
+              # path relative to repo root inside scanner_reports checkout
+              rel="${folder#${ROOT}/}/${f}"
+              ts=$(git -C "$ROOT" log -1 --format="%ct" -- "$rel" 2>/dev/null || echo 0)
+              ts=${ts:-0}
+              if [[ "$ts" -gt "$bestTs" ]]; then
+                bestTs="$ts"
+                best="$f"
               fi
             done
 
-            if [[ ${#matches[@]} -gt 0 ]]; then
-              echo "✅ Found ${#matches[@]} sha-matching files"
+            echo "$best|$bestTs"
+          }
 
-              best=""
-              bestTs=0
-              for f in "${matches[@]}"; do
-                ts=$(git -C "$ROOT" log -1 --format="%ct" -- "${REPORTS_DIR}/${f}" 2>/dev/null || echo 0)
-                ts=${ts:-0}
-                if [[ "$ts" -gt "$bestTs" ]]; then
-                  bestTs="$ts"
-                  best="$f"
-                fi
-              done
+          FOUND_FILE=""
+          FOUND_PATH=""
+          FOUND_TS="0"
 
-              found="$best"
+          # wait loop in case PR workflow starts before delta workflow finished pushing the file
+          for attempt in {1..12}; do
+            echo "Attempt ${attempt}/12..."
+
+            for folder in "${CANDIDATES[@]}"; do
+              if [[ ! -d "$folder" ]]; then
+                continue
+              fi
+
+              mapfile -t ALL_FILES < <(find "$folder" -maxdepth 1 -type f -name "*.csv" -printf "%f\n" | sort)
+              if [[ ${#ALL_FILES[@]} -eq 0 ]]; then
+                continue
+              fi
+
+              # Priority matches:
+              # 1) contains into_<HEAD_SHORT>  (your filename has ..._into_<head>...)
+              mapfile -t M1 < <(printf "%s\n" "${ALL_FILES[@]}" | grep -F "into_${HEAD_SHORT}" || true)
+
+              # 2) ends with _<HEAD_SHORT>.csv  (sometimes you keep short sha at end)
+              mapfile -t M2 < <(printf "%s\n" "${ALL_FILES[@]}" | grep -E "_${HEAD_SHORT}\.csv$" || true)
+
+              # 3) contains HEAD_SHORT anywhere
+              mapfile -t M3 < <(printf "%s\n" "${ALL_FILES[@]}" | grep -F "${HEAD_SHORT}" || true)
+
+              # 4) fallback: contains BASE_SHORT anywhere (merge/base part)
+              mapfile -t M4 < <(printf "%s\n" "${ALL_FILES[@]}" | grep -F "${BASE_SHORT}" || true)
+
+              use=()
+              if [[ ${#M1[@]} -gt 0 ]]; then
+                use=("${M1[@]}")
+                echo "✅ Match group: into_HEAD_SHORT (${#use[@]})"
+              elif [[ ${#M2[@]} -gt 0 ]]; then
+                use=("${M2[@]}")
+                echo "✅ Match group: endswith_HEAD_SHORT (${#use[@]})"
+              elif [[ ${#M3[@]} -gt 0 ]]; then
+                use=("${M3[@]}")
+                echo "✅ Match group: contains_HEAD_SHORT (${#use[@]})"
+              elif [[ ${#M4[@]} -gt 0 ]]; then
+                use=("${M4[@]}")
+                echo "ℹ️ Fallback match: contains_BASE_SHORT (${#use[@]})"
+              else
+                continue
+              fi
+
+              result="$(pick_latest_by_git_time "$folder" "${use[@]}")"
+              f="${result%%|*}"
+              ts="${result##*|}"
+
+              if [[ -n "$f" && "$ts" -gt "$FOUND_TS" ]]; then
+                FOUND_FILE="$f"
+                FOUND_PATH="${folder}/${f}"
+                FOUND_TS="$ts"
+              fi
+            done
+
+            if [[ -n "$FOUND_FILE" ]]; then
+              echo "✅ Found report: $FOUND_FILE (ts=$FOUND_TS)"
               break
             fi
 
-            echo "Attempt ${attempt}/12... not found yet. Waiting 10s"
+            echo "Not found yet. Waiting 10s..."
             sleep 10
           done
 
-          if [[ -z "$found" ]]; then
-            echo "⚠️ No report file found for this SCAN_SHA yet. (Will not set report fields)"
+          if [[ -z "$FOUND_FILE" ]]; then
+            echo "⚠️ No report file found for this PR yet. Will not set report fields."
             echo "REPORT_FILE_NAME=" >> "$GITHUB_OUTPUT"
             echo "REPORT_FILE_PATH=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "✅ Selected report for this PR: $found"
-          echo "REPORT_FILE_NAME=$found" >> "$GITHUB_OUTPUT"
-          echo "REPORT_FILE_PATH=${REPORTS_DIR}/${found}" >> "$GITHUB_OUTPUT"
+          echo "REPORT_FILE_NAME=$FOUND_FILE" >> "$GITHUB_OUTPUT"
+          # store path relative to branch root in case you need it later
+          # normalize to Artifact/<file> even if we matched repoName/Artifact
+          echo "REPORT_FILE_PATH=${DIR}/${FOUND_FILE}" >> "$GITHUB_OUTPUT"
 
-      # ✅ Fetch check-runs for SCAN_SHA + map to SF fields
       - name: Fetch check runs + map checks into SF fields (status + report file)
         if: steps.pr_ctx.outputs.SKIP != 'true'
         id: fetch_checks
@@ -271,8 +313,8 @@ jobs:
           set -euo pipefail
 
           REPO="${{ github.repository }}"
+          SHA="${{ steps.pr_ctx.outputs.PR_HEAD_SHA }}"
           TOKEN="${{ secrets.GITHUB_TOKEN }}"
-          SHA="${{ steps.pr_ctx.outputs.SCAN_SHA }}"
 
           LATEST_REPORT_FILE="${{ steps.latest_report.outputs.REPORT_FILE_NAME }}"
 
@@ -353,7 +395,7 @@ jobs:
                 derivedStatus="${concl:-unknown}"
               fi
 
-              # ✅ Set report file ONLY if we found matching file for SCAN_SHA
+              # ✅ Use report file found for THIS PR
               if [[ -n "$LATEST_REPORT_FILE" ]]; then
                 reportFileName="$LATEST_REPORT_FILE"
               fi

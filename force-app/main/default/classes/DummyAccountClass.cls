@@ -36,7 +36,7 @@ public with sharing class DummyAccountClass {
         if(Schema.sObjectType.Account.isCreateable()){
             for(Account acc : accList){
                 if(Schema.sObjectType.Account.fields.Description.isUpdateable()){
-                    acc.Description = 'Happy Welcome Broo, How are you boss?';
+                    acc.Description = 'Happy Welcome Broo, How are you bosss?';
                 }
             }
             insert accList;
