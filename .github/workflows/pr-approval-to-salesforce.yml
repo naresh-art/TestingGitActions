@@ -228,7 +228,7 @@ jobs:
 
           # Wait up to ~3 minutes (18 * 10s)
           FOUND=""
-          for attempt in {1..18}; do
+          for attempt in {1..30}; do
             # list ALL tracked csv files from git (reliable)
             ALL_FILES=$(git -C "$ROOT" ls-tree -r --name-only HEAD "${REPORTS_DIR}" | grep -E '\.csv$' | sed "s#^${REPORTS_DIR}/##" || true)
 
