@@ -1,13 +1,11 @@
 name: PR Approval & Merge Tracking
 
 on:
-  # ✅ Run AFTER delta scan workflow completes (best sync)
   workflow_run:
     workflows:
       - "Salesforce Code Scan and Critical Permissions Check on Pull Request"
     types: [completed]
 
-  # ✅ Still allow direct PR triggers
   pull_request_review:
     types: [submitted]
 
@@ -25,6 +23,10 @@ permissions:
   pull-requests: read
   checks: read
   actions: read
+
+concurrency:
+  group: pr_process-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   pr_process:
@@ -73,7 +75,6 @@ jobs:
           echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> "$GITHUB_ENV"
           echo "INSTANCE_URL=$INSTANCE_URL" >> "$GITHUB_ENV"
 
-      # ✅ Load PR Context (supports pull_request / review / check_run / check_suite / workflow_run)
       - name: Load PR Context
         id: pr_ctx
         shell: bash
@@ -123,7 +124,6 @@ jobs:
           PR_MERGED_BY=$(echo "$PR_JSON" | jq -r '.merged_by.login // ""')
           PR_HEAD_SHA_FROM_API=$(echo "$PR_JSON" | jq -r '.head.sha')
 
-          # Prefer workflow_run head_sha if present (but API is also OK)
           if [[ -z "$PR_HEAD_SHA" ]]; then
             PR_HEAD_SHA="$PR_HEAD_SHA_FROM_API"
           fi
@@ -180,7 +180,6 @@ jobs:
           echo "PR_STATUS=$PR_STATUS" >> "$GITHUB_OUTPUT"
           echo "MERGED_BY=$MERGED_BY" >> "$GITHUB_OUTPUT"
 
-      # ✅ Checkout Scanner_Reports branch
       - name: Checkout Scanner_Reports branch (for report lookup)
         if: steps.pr_ctx.outputs.SKIP != 'true'
         uses: actions/checkout@v4
@@ -189,10 +188,7 @@ jobs:
           fetch-depth: 0
           path: scanner_reports
 
-      # ✅ FIX: Find report file by matching FULL PR HEAD SHA anywhere in filename.
-      # ✅ FIX: Checks ALL tracked files using git ls-tree (no missing files).
-      # ✅ Includes WAIT loop so PR workflow can run immediately and still find file once delta scan pushes it.
-      - name: Get Delta Report File for this PR (match full head SHA + wait)
+      - name: Get Delta Report File for this PR (match full head SHA + wait + show checked names)
         if: steps.pr_ctx.outputs.SKIP != 'true'
         id: latest_report
         shell: bash
@@ -200,13 +196,16 @@ jobs:
           set -euo pipefail
 
           ROOT="scanner_reports"
-          REPORTS_DIR="${{ env.SCANNER_REPORTS_DIR }}"   # Artifact
+          BRANCH="${{ env.SCANNER_REPORTS_BRANCH }}"
+          REPORTS_DIR="${{ env.SCANNER_REPORTS_DIR }}"
+
           FULL_SHA="${{ steps.pr_ctx.outputs.PR_HEAD_SHA }}"
           SHORT_SHA="$(echo "$FULL_SHA" | cut -c1-7)"
 
           echo "🔎 Need report containing full PR head SHA: $FULL_SHA"
           echo "🔎 Also accept short SHA: $SHORT_SHA"
           echo "🔎 Searching in: ${ROOT}/${REPORTS_DIR}"
+          echo "🔎 Branch: $BRANCH"
 
           pick_latest_by_commit () {
             local match_list="$1"
@@ -215,7 +214,7 @@ jobs:
 
             while IFS= read -r f; do
               [[ -z "$f" ]] && continue
-              ts=$(git -C "$ROOT" log -1 --format="%ct" -- "${REPORTS_DIR}/${f}" 2>/dev/null || echo 0)
+              ts=$(git -C "$ROOT" log -1 --format="%ct" "origin/${BRANCH}" -- "${REPORTS_DIR}/${f}" 2>/dev/null || echo 0)
               ts=${ts:-0}
               if [[ "$ts" -gt "$bestTs" ]]; then
                 bestTs="$ts"
@@ -226,33 +225,64 @@ jobs:
             echo "$best|$bestTs"
           }
 
-          # Wait up to ~3 minutes (18 * 10s)
+          echo "Refreshing branch snapshot..."
+          git -C "$ROOT" fetch origin "$BRANCH" --prune
+          git -C "$ROOT" checkout -q "$BRANCH" || true
+          git -C "$ROOT" reset --hard "origin/$BRANCH"
+          git -C "$ROOT" clean -fd
+
+          BASE_FILES=$(git -C "$ROOT" ls-tree -r --name-only "origin/$BRANCH" "$REPORTS_DIR" \
+            | grep -E '\.csv$' \
+            | sed "s#^${REPORTS_DIR}/##" \
+            || true)
+
+          FILE_COUNT=$(echo "$BASE_FILES" | sed '/^\s*$/d' | wc -l | tr -d ' ')
+          if [[ "$FILE_COUNT" -lt 1 ]]; then
+            MAX_ATTEMPTS=30
+          else
+            MAX_ATTEMPTS="$FILE_COUNT"
+          fi
+
+          echo "Folder file size (csv count) = $FILE_COUNT"
+          echo "Max attempts = $MAX_ATTEMPTS"
+
           FOUND=""
-          for attempt in {1..30}; do
-            # list ALL tracked csv files from git (reliable)
-            ALL_FILES=$(git -C "$ROOT" ls-tree -r --name-only HEAD "${REPORTS_DIR}" | grep -E '\.csv$' | sed "s#^${REPORTS_DIR}/##" || true)
 
-            # Try FULL SHA match first (your filename contains Merge_<FULLSHA>)
+          for ((attempt=1; attempt<=MAX_ATTEMPTS; attempt++)); do
+            echo "-------------------------------"
+            echo "Attempt $attempt/$MAX_ATTEMPTS"
+
+            git -C "$ROOT" fetch origin "$BRANCH" --prune
+            git -C "$ROOT" reset --hard "origin/$BRANCH"
+            git -C "$ROOT" clean -fd
+
+            ALL_FILES=$(git -C "$ROOT" ls-tree -r --name-only "origin/$BRANCH" "$REPORTS_DIR" \
+              | grep -E '\.csv$' \
+              | sed "s#^${REPORTS_DIR}/##" \
+              || true)
+
+            COUNT=$(echo "$ALL_FILES" | sed '/^\s*$/d' | wc -l | tr -d ' ')
+            echo "Branch Artifact Files count: $COUNT"
+            echo "Branch Artifact Files:"
+            echo "$ALL_FILES"
+
             MATCH_FULL=$(echo "$ALL_FILES" | grep -F "$FULL_SHA" || true)
-
-            # If not found, try SHORT SHA
             MATCH_SHORT=$(echo "$ALL_FILES" | grep -F "$SHORT_SHA" || true)
 
+            echo "Check Match File  Name (FULL): ${MATCH_FULL:-<none>}"
+            echo "Check Short File Name (SHORT): ${MATCH_SHORT:-<none>}"
+
             if [[ -n "$MATCH_FULL" ]]; then
-              echo "✅ Found FULL-SHA matching files:"
-              echo "$MATCH_FULL"
               FOUND="$MATCH_FULL"
               break
             fi
 
             if [[ -n "$MATCH_SHORT" ]]; then
-              echo "✅ Found SHORT-SHA matching files:"
-              echo "$MATCH_SHORT"
               FOUND="$MATCH_SHORT"
               break
             fi
 
-            echo "Attempt $attempt/18... not found yet. Waiting 10s"
+            echo "⏳ Not found yet. Waiting 10s..."
             sleep 10
           done
 
@@ -289,7 +319,6 @@ jobs:
           SHA="${{ steps.pr_ctx.outputs.PR_HEAD_SHA }}"
           TOKEN="${{ secrets.GITHUB_TOKEN }}"
 
-          # ✅ report filename found from Scanner_Reports/Artifact
           DELTA_REPORT_FILE="${{ steps.latest_report.outputs.REPORT_FILE_NAME }}"
 
           CHECK_NAMES_CLEAN=$(echo "${CHECK_NAMES}" | tr -d '\r')
@@ -369,7 +398,6 @@ jobs:
                 derivedStatus="${concl:-unknown}"
               fi
 
-              # ✅ set delta report filename only if we found it
               if [[ -n "$DELTA_REPORT_FILE" ]]; then
                 reportFileName="$DELTA_REPORT_FILE"
               fi
