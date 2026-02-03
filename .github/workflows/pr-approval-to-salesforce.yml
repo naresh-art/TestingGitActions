@@ -1,6 +1,11 @@
 name: PR Approval & Merge Tracking
 
 on:
+  workflow_run:
+    workflows:
+      - "Salesforce Code Scan and Critical Permissions Check on Pull Request"
+    types: [completed]
+    
   pull_request_review:
     types: [submitted]
 
