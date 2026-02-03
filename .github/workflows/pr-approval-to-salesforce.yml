@@ -1,17 +1,24 @@
 name: PR Approval & Merge Tracking
 
 on:
+  # ✅ Run PR workflow AFTER Delta Scan workflow completes
+  workflow_run:
+    workflows:
+      - "Salesforce Code Scan and Critical Permissions Check on Pull Request"
+    types: [completed]
+
   pull_request_review:
     types: [submitted]
 
-  pull_request:
-    types: [opened, reopened, synchronize, closed]
-
+  # (Optional) keep these if you still want extra refreshes
   check_run:
     types: [completed]
-
   check_suite:
     types: [completed]
+
+  # ✅ Keep PR status updates (open/close/reopen/sync)
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
 
 permissions:
   contents: read
@@ -32,7 +39,6 @@ jobs:
       CHECK_ACTION_STATUS_FIELDS: ${{ vars.CHECK_ACTION_STATUS_FIELDS }}
       CHECK_ACTION_REPORT_FIELDS: ${{ vars.CHECK_ACTION_REPORT_FIELDS }}
 
-      # ✅ Your delta workflow writes reports here
       SCANNER_REPORTS_BRANCH: Scanner_Reports
       SCANNER_REPORTS_DIR: Artifact
 
@@ -66,7 +72,7 @@ jobs:
           echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> "$GITHUB_ENV"
           echo "INSTANCE_URL=$INSTANCE_URL" >> "$GITHUB_ENV"
 
-      # ✅ Get PR context for ALL event types (pull_request / review / check_run / check_suite)
+      # ✅ Get PR context for ALL event types (pull_request / review / check_run / check_suite / workflow_run)
       - name: Load PR Context
         id: pr_ctx
         shell: bash
@@ -84,6 +90,9 @@ jobs:
             PR_NUMBER=$(echo '${{ toJson(github.event.check_run.check_suite.pull_requests) }}' | jq -r '.[0].number // empty')
           elif [[ "${{ github.event_name }}" == "check_suite" ]]; then
             PR_NUMBER=$(echo '${{ toJson(github.event.check_suite.pull_requests) }}' | jq -r '.[0].number // empty')
+          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            # ✅ Delta scan completed -> this carries PR info here
+            PR_NUMBER=$(echo '${{ toJson(github.event.workflow_run.pull_requests) }}' | jq -r '.[0].number // empty')
           fi
 
           if [[ -z "$PR_NUMBER" ]]; then
@@ -164,8 +173,8 @@ jobs:
           echo "PR_STATUS=$PR_STATUS" >> "$GITHUB_OUTPUT"
           echo "MERGED_BY=$MERGED_BY" >> "$GITHUB_OUTPUT"
 
-      # ✅ Checkout Scanner_Reports branch so we can use git log timestamps per file
-      - name: Checkout Scanner_Reports branch (for latest file detection)
+      # ✅ Checkout Scanner_Reports branch so we can read files + git history
+      - name: Checkout Scanner_Reports branch (for report lookup)
         if: steps.pr_ctx.outputs.SKIP != 'true'
         uses: actions/checkout@v4
         with:
@@ -173,16 +182,17 @@ jobs:
           fetch-depth: 0
           path: scanner_reports
 
-      # ✅ FIXED: Determine latest file by "Last commit date" (not by filename sort)
-      - name: Get Latest Report File from Scanner_Reports (by last commit date)
+      # ✅ STRICT: Pick ONLY file for this PR commit (short sha match). NO fallback.
+      # ✅ Also includes retry because branch push may take some seconds after delta workflow finishes.
+      - name: Get Delta Report File for this PR (strict sha match)
         if: steps.pr_ctx.outputs.SKIP != 'true'
         id: latest_report
         shell: bash
         run: |
           set -euo pipefail
 
-          REPORTS_DIR="${{ env.SCANNER_REPORTS_DIR }}"   # Artifact
           ROOT="scanner_reports"
+          REPORTS_DIR="${{ env.SCANNER_REPORTS_DIR }}"   # Artifact
           FULL_DIR="${ROOT}/${REPORTS_DIR}"
 
           if [[ ! -d "$FULL_DIR" ]]; then
@@ -195,65 +205,53 @@ jobs:
           PR_SHA="${{ steps.pr_ctx.outputs.PR_HEAD_SHA }}"
           SHORT_SHA="$(echo "$PR_SHA" | cut -c1-7)"
 
-          echo "🔎 Looking for latest CSV in: $FULL_DIR"
-          echo "🔎 Prefer files containing short sha: $SHORT_SHA"
+          echo "🔎 Need report containing: _${SHORT_SHA}.csv"
+          echo "🔎 Searching in: ${FULL_DIR}"
 
-          mapfile -t FILES < <(find "$FULL_DIR" -maxdepth 1 -type f -name "*.csv" -printf "%f\n" | sort)
+          found=""
 
-          if [[ ${#FILES[@]} -eq 0 ]]; then
-            echo "❌ No CSV files found in $FULL_DIR"
-            echo "REPORT_FILE_NAME=" >> "$GITHUB_OUTPUT"
-            echo "REPORT_FILE_PATH=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          # Retry (GitHub may still be pushing branch changes)
+          for attempt in {1..12}; do
+            echo "Attempt $attempt/12..."
+            # Refresh branch just in case (safe)
+            git -C "$ROOT" fetch --all --prune >/dev/null 2>&1 || true
 
-          shaMatches=()
-          for f in "${FILES[@]}"; do
-            if [[ "$f" == *"_${SHORT_SHA}.csv" ]]; then
-              shaMatches+=("$f")
+            # Find sha matching files
+            matches=$(find "$FULL_DIR" -maxdepth 1 -type f -name "*_${SHORT_SHA}.csv" -printf "%f\n" | sort || true)
+
+            if [[ -n "$matches" ]]; then
+              # If multiple matches, pick the most recently committed among them
+              best=""
+              bestTs=0
+              while IFS= read -r f; do
+                [[ -z "$f" ]] && continue
+                ts=$(git -C "$ROOT" log -1 --format="%ct" -- "${REPORTS_DIR}/${f}" 2>/dev/null || echo 0)
+                ts=${ts:-0}
+                if [[ "$ts" -gt "$bestTs" ]]; then
+                  bestTs="$ts"
+                  best="$f"
+                fi
+              done <<< "$matches"
+
+              found="$best"
+              echo "✅ Found matching file: $found (commit_ts=$bestTs)"
+              break
             fi
+
+            sleep 10
           done
 
-          pick_latest_by_commit () {
-            local -n arr=$1
-            local best=""
-            local bestTs=0
-
-            for f in "${arr[@]}"; do
-              ts=$(git -C "$ROOT" log -1 --format="%ct" -- "${REPORTS_DIR}/${f}" 2>/dev/null || echo 0)
-              ts=${ts:-0}
-              if [[ "$ts" -gt "$bestTs" ]]; then
-                bestTs="$ts"
-                best="$f"
-              fi
-            done
-
-            echo "$best|$bestTs"
-          }
-
-          if [[ ${#shaMatches[@]} -gt 0 ]]; then
-            echo "✅ Found sha-matching files: ${#shaMatches[@]}"
-            result="$(pick_latest_by_commit shaMatches)"
-          else
-            echo "ℹ️ No sha-matching files found. Falling back to latest overall."
-            result="$(pick_latest_by_commit FILES)"
-          fi
-
-          LATEST_FILE="${result%%|*}"
-          LATEST_TS="${result##*|}"
-
-          if [[ -z "$LATEST_FILE" ]]; then
-            echo "❌ Could not determine latest file."
+          if [[ -z "$found" ]]; then
+            echo "⚠️ No report file found for this PR SHA yet. Will not set report fields."
             echo "REPORT_FILE_NAME=" >> "$GITHUB_OUTPUT"
             echo "REPORT_FILE_PATH=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "✅ Latest report file (by commit time): $LATEST_FILE (ts=$LATEST_TS)"
-          echo "REPORT_FILE_NAME=$LATEST_FILE" >> "$GITHUB_OUTPUT"
-          echo "REPORT_FILE_PATH=${REPORTS_DIR}/${LATEST_FILE}" >> "$GITHUB_OUTPUT"
+          echo "REPORT_FILE_NAME=$found" >> "$GITHUB_OUTPUT"
+          echo "REPORT_FILE_PATH=${REPORTS_DIR}/${found}" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch check runs + map checks into SF fields (status + report file from path)
+      - name: Fetch check runs + map checks into SF fields (status + report file)
         if: steps.pr_ctx.outputs.SKIP != 'true'
         id: fetch_checks
         shell: bash
@@ -264,7 +262,7 @@ jobs:
           SHA="${{ steps.pr_ctx.outputs.PR_HEAD_SHA }}"
           TOKEN="${{ secrets.GITHUB_TOKEN }}"
 
-          # ✅ latest filename from repo path (NOT artifacts)
+          # ✅ strictly sha-matched filename (might be empty if not available yet)
           LATEST_REPORT_FILE="${{ steps.latest_report.outputs.REPORT_FILE_NAME }}"
 
           CHECK_NAMES_CLEAN=$(echo "${CHECK_NAMES}" | tr -d '\r')
@@ -292,6 +290,7 @@ jobs:
             exit 1
           fi
 
+          # Fetch check-runs (retry)
           CHECK_RUNS=""
           for attempt in {1..8}; do
             CHECK_RUNS=$(curl -sS \
@@ -344,7 +343,7 @@ jobs:
                 derivedStatus="${concl:-unknown}"
               fi
 
-              # ✅ use repo-path latest file (based on last commit date)
+              # ✅ Only set report filename if we found sha-matched file
               if [[ -n "$LATEST_REPORT_FILE" ]]; then
                 reportFileName="$LATEST_REPORT_FILE"
               fi
