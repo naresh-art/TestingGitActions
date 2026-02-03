@@ -1,7 +1,6 @@
 name: PR Approval & Merge Tracking
 
 on:
-  # ✅ Run AFTER delta scan workflow finishes (this is the sync you need)
   workflow_run:
     workflows:
       - "Salesforce Code Scan and Critical Permissions Check on Pull Request"
@@ -29,11 +28,6 @@ jobs:
   pr_process:
     runs-on: ubuntu-latest
 
-    # ✅ Prevent overlapping runs from writing null and then overwriting later
-    concurrency:
-      group: pr-merge-tracking-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
-      cancel-in-progress: true
-
     env:
       DOMAIN_URL: ${{ vars.SF_DOMAIN_URL }}
       OBJECT_NAME: ${{ vars.SF_OBJECT_NAME }}
@@ -43,7 +37,6 @@ jobs:
       CHECK_ACTION_STATUS_FIELDS: ${{ vars.CHECK_ACTION_STATUS_FIELDS }}
       CHECK_ACTION_REPORT_FIELDS: ${{ vars.CHECK_ACTION_REPORT_FIELDS }}
 
-      # ✅ Delta workflow pushes reports here
       SCANNER_REPORTS_BRANCH: Scanner_Reports
       SCANNER_REPORTS_DIR: Artifact
 
@@ -77,7 +70,7 @@ jobs:
           echo "SF_ACCESS_TOKEN=$SF_ACCESS_TOKEN" >> "$GITHUB_ENV"
           echo "INSTANCE_URL=$INSTANCE_URL" >> "$GITHUB_ENV"
 
-      # ✅ Load PR context for ALL event types INCLUDING workflow_run
+      # ✅ Load PR Context + compute SCAN_SHA (critical fix)
       - name: Load PR Context
         id: pr_ctx
         shell: bash
@@ -88,6 +81,7 @@ jobs:
           TOKEN="${{ secrets.GITHUB_TOKEN }}"
 
           PR_NUMBER=""
+          SCAN_SHA=""
 
           if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "pull_request_review" ]]; then
             PR_NUMBER="${{ github.event.pull_request.number }}"
@@ -97,6 +91,7 @@ jobs:
             PR_NUMBER=$(echo '${{ toJson(github.event.check_suite.pull_requests) }}' | jq -r '.[0].number // empty')
           elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
             PR_NUMBER=$(echo '${{ toJson(github.event.workflow_run.pull_requests) }}' | jq -r '.[0].number // empty')
+            SCAN_SHA="${{ github.event.workflow_run.head_sha }}"
           fi
 
           if [[ -z "$PR_NUMBER" ]]; then
@@ -125,6 +120,11 @@ jobs:
           PR_MERGED_BY=$(echo "$PR_JSON" | jq -r '.merged_by.login // ""')
           PR_HEAD_SHA=$(echo "$PR_JSON" | jq -r '.head.sha')
 
+          # ✅ If not workflow_run, use current PR head SHA for scan sha
+          if [[ -z "$SCAN_SHA" ]]; then
+            SCAN_SHA="$PR_HEAD_SHA"
+          fi
+
           echo "SKIP=false" >> "$GITHUB_OUTPUT"
           echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "PR_TITLE=$PR_TITLE" >> "$GITHUB_OUTPUT"
@@ -134,8 +134,11 @@ jobs:
           echo "PR_MERGED=$PR_MERGED" >> "$GITHUB_OUTPUT"
           echo "PR_MERGED_BY=$PR_MERGED_BY" >> "$GITHUB_OUTPUT"
           echo "PR_HEAD_SHA=$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "SCAN_SHA=$SCAN_SHA" >> "$GITHUB_OUTPUT"
 
-          echo "✅ PR loaded: #$PR_NUMBER sha=$PR_HEAD_SHA"
+          echo "✅ PR #$PR_NUMBER"
+          echo "✅ PR_HEAD_SHA=$PR_HEAD_SHA"
+          echo "✅ SCAN_SHA=$SCAN_SHA"
 
       - name: Stop if no PR context
         if: steps.pr_ctx.outputs.SKIP == 'true'
@@ -188,8 +191,8 @@ jobs:
           fetch-depth: 0
           path: scanner_reports
 
-      # ✅ IMPORTANT FIX: Poll until the PR's report is present in Scanner_Reports/Artifact
-      - name: Get Delta Report File for this PR (sha match + wait)
+      # ✅ Find report file for THIS scan commit (SCAN_SHA)
+      - name: Get Delta Report File for this PR (strict sha match + wait)
         if: steps.pr_ctx.outputs.SKIP != 'true'
         id: latest_report
         shell: bash
@@ -197,7 +200,7 @@ jobs:
           set -euo pipefail
 
           ROOT="scanner_reports"
-          REPORTS_DIR="${{ env.SCANNER_REPORTS_DIR }}"   # Artifact
+          REPORTS_DIR="${{ env.SCANNER_REPORTS_DIR }}"
           FULL_DIR="${ROOT}/${REPORTS_DIR}"
 
           if [[ ! -d "$FULL_DIR" ]]; then
@@ -207,8 +210,8 @@ jobs:
             exit 0
           fi
 
-          PR_SHA="${{ steps.pr_ctx.outputs.PR_HEAD_SHA }}"
-          SHORT_SHA="$(echo "$PR_SHA" | cut -c1-7)"
+          SCAN_SHA="${{ steps.pr_ctx.outputs.SCAN_SHA }}"
+          SHORT_SHA="$(echo "$SCAN_SHA" | cut -c1-7)"
 
           echo "🔎 Need report containing: ${SHORT_SHA}"
           echo "🔎 Searching in: ${FULL_DIR}"
@@ -216,12 +219,11 @@ jobs:
           found=""
 
           for attempt in {1..12}; do
-            # find csv files
             mapfile -t ALL_FILES < <(find "$FULL_DIR" -maxdepth 1 -type f -name "*.csv" -printf "%f\n" | sort || true)
 
-            # match sha ANYWHERE in filename (not only suffix)
             matches=()
             for f in "${ALL_FILES[@]}"; do
+              # ✅ contains merge SHA or into SHA etc. (just ensure it contains SHORT_SHA anywhere)
               if [[ "$f" == *"${SHORT_SHA}"* ]]; then
                 matches+=("$f")
               fi
@@ -230,7 +232,6 @@ jobs:
             if [[ ${#matches[@]} -gt 0 ]]; then
               echo "✅ Found ${#matches[@]} sha-matching files"
 
-              # pick newest by last commit time for that file
               best=""
               bestTs=0
               for f in "${matches[@]}"; do
@@ -251,7 +252,7 @@ jobs:
           done
 
           if [[ -z "$found" ]]; then
-            echo "⚠️ No report file found for this PR SHA yet. Will not set report fields."
+            echo "⚠️ No report file found for this SCAN_SHA yet. (Will not set report fields)"
             echo "REPORT_FILE_NAME=" >> "$GITHUB_OUTPUT"
             echo "REPORT_FILE_PATH=" >> "$GITHUB_OUTPUT"
             exit 0
@@ -261,6 +262,7 @@ jobs:
           echo "REPORT_FILE_NAME=$found" >> "$GITHUB_OUTPUT"
           echo "REPORT_FILE_PATH=${REPORTS_DIR}/${found}" >> "$GITHUB_OUTPUT"
 
+      # ✅ Fetch check-runs for SCAN_SHA + map to SF fields
       - name: Fetch check runs + map checks into SF fields (status + report file)
         if: steps.pr_ctx.outputs.SKIP != 'true'
         id: fetch_checks
@@ -269,8 +271,8 @@ jobs:
           set -euo pipefail
 
           REPO="${{ github.repository }}"
-          SHA="${{ steps.pr_ctx.outputs.PR_HEAD_SHA }}"
           TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          SHA="${{ steps.pr_ctx.outputs.SCAN_SHA }}"
 
           LATEST_REPORT_FILE="${{ steps.latest_report.outputs.REPORT_FILE_NAME }}"
 
@@ -351,7 +353,7 @@ jobs:
                 derivedStatus="${concl:-unknown}"
               fi
 
-              # ✅ only set report filename if we actually found the report for this PR
+              # ✅ Set report file ONLY if we found matching file for SCAN_SHA
               if [[ -n "$LATEST_REPORT_FILE" ]]; then
                 reportFileName="$LATEST_REPORT_FILE"
               fi
